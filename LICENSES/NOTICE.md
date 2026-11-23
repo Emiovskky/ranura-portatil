@@ -21,3 +21,11 @@
 ## Código propio de Ranura
 - `index.html`, `sw.js` y los cartuchos de prueba incluidos (homebrew escrito para Ranura) no contienen
   código ni recursos de juegos comerciales. Ranura no incluye juegos.
+
+## Modo PSP experimental (`psp.html`, carpeta `psp/ejs/`)
+- **EmulatorJS 4.2.3** — https://github.com/EmulatorJS/EmulatorJS — licencia GPL-3.0 (texto en `GPL-3.0.txt`).
+  Archivos de `@emulatorjs/emulatorjs@4.2.3` sin modificar (`loader.js`, `src/`, `compression/`, `localization/`).
+- **PPSSPP** (núcleo `ppsspp` de EmulatorJS, `@emulatorjs/core-ppsspp@4.2.3`) — https://github.com/hrydgard/ppsspp —
+  licencia GPL-2.0 o posterior. Código fuente del núcleo compilado: https://github.com/EmulatorJS/ppsspp y
+  scripts de compilación en https://github.com/EmulatorJS/build. `ppsspp-assets.zip` son los recursos de PPSSPP.
+- `compression/libunrar.*` proviene de EmulatorJS (UnRAR, con su propia licencia de uso libre para descompresión).

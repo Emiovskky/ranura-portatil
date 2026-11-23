@@ -14,3 +14,8 @@ escrito para Ranura.
 
 Tus juegos y partidas se guardan solo en tu dispositivo (IndexedDB). Usa «Respaldar partidas» para
 guardar una copia en Archivos o iCloud Drive.
+
+## PSP experimental
+`psp.html` carga PPSSPP compilado para la web (EmulatorJS, GPL-3.0; núcleo PPSSPP, GPL-2.0+). Es un
+experimento sin probar con juegos comerciales ni en Safari de iPhone; para jugar en serio usa PPSSPP de la
+App Store. Avisos y enlaces al código fuente en [`LICENSES/NOTICE.md`](LICENSES/NOTICE.md).

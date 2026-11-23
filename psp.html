@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ranura · PSP experimental</title>
+<meta name="theme-color" content="#0d0f24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<style>
+/* Layout: same night/indigo world as Ranura; one column of checks, the file slot, then the emulator stage. */
+:root {
+  --night: #0d0f24; --night-2: #171b40; --plastic: #161a36; --plastic-hi: #282e5c;
+  --ink: #f1f2ff; --ink-2: #b9c0ec; --ink-3: #8189c2;
+  --coral: #ff5f45; --coral-hi: #ff8a6e; --coral-deep: #b3361f; --mint: #5ce0a6; --amber: #ffc45e;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--night) linear-gradient(180deg, var(--night-2), var(--night) 320px) no-repeat; color: var(--ink); font: 16px/1.45 var(--font); -webkit-text-size-adjust: 100%; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+main { max-width: 720px; margin: 0 auto; padding: 18px max(16px, env(safe-area-inset-left, 0px)) 40px max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 18px; }
+a { color: var(--coral-hi); }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.back { color: var(--ink-2); text-decoration: none; font-weight: 600; }
+.tag { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--night); background: var(--amber); padding: 3px 8px; border-radius: 6px; }
+h1 { margin: 0; font-size: clamp(28px, 8vw, 44px); line-height: 1.05; letter-spacing: -.01em; }
+p { margin: 0; color: var(--ink-2); max-width: 65ch; }
+.card { padding: 16px; border-radius: 16px; background: rgba(22, 26, 54, .75); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); display: grid; gap: 10px; }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.checks li { display: flex; gap: 10px; align-items: baseline; font-size: 15px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--ink-3); transform: translateY(1px); }
+.ok .dot { background: var(--mint); } .bad .dot { background: var(--coral); }
+.slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border-radius: 16px; background: var(--plastic); cursor: pointer; }
+.slot strong { display: block; font-size: 18px; }
+.slot span { color: var(--ink-2); font-size: 14px; }
+.slot[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.plus { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--coral); color: #12152c; font-size: 24px; font-weight: 700; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+#msg { min-height: 1.4em; font-size: 14px; }
+#msg[data-tone="error"] { color: #ff9b86; } #msg[data-tone="ok"] { color: var(--mint); }
+#stage { position: fixed; inset: 0; z-index: 10; background: #000; }
+#game { width: 100%; height: 100%; }
+#closeGame { position: fixed; z-index: 20; top: max(8px, env(safe-area-inset-top, 0px)); left: max(8px, env(safe-area-inset-left, 0px)); border: 0; border-radius: 999px; padding: 8px 14px; background: rgba(13,15,36,.85); color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<main id="home">
+  <div class="top"><a class="back" href="./">← Ranura</a><span class="tag">Experimental</span></div>
+  <h1>PSP en el navegador</h1>
+  <p>Usa PPSSPP compilado para la web (EmulatorJS). Es un experimento: no está probado con juegos comerciales ni en Safari de iPhone, y juegos pesados como God of War pueden ir lentos, no arrancar o cerrar la pestaña por falta de memoria. Para jugar en serio, usa <a href="https://apps.apple.com/us/app/ppsspp-psp-emulator/id6496972903" rel="noopener">PPSSPP de la App Store</a>.</p>
+
+  <section class="card" aria-labelledby="h-checks">
+    <strong id="h-checks">Requisitos de este navegador</strong>
+    <ul class="checks" id="checks"></ul>
+  </section>
+
+  <label class="slot" id="slot" for="iso" aria-disabled="true">
+    <span><strong>Abrir juego de PSP</strong><span>.iso, .cso, .pbp o .elf desde Archivos · copia de un disco tuyo</span></span>
+    <span class="plus" aria-hidden="true">+</span>
+    <input class="vh" type="file" id="iso">
+  </label>
+  <p id="msg" role="status" aria-live="polite"></p>
+
+  <section class="card">
+    <strong>Qué esperar</strong>
+    <p>La primera vez descarga unos 15 MB del motor; después queda guardado para usarlo sin conexión. El juego se carga completo en memoria: un archivo .cso pesa menos que un .iso y tiene más probabilidad de funcionar. Las partidas guardadas dentro del juego quedan en el almacenamiento del navegador.</p>
+    <p>Licencias: EmulatorJS (GPL-3.0) y PPSSPP (GPL-2.0 o posterior). Avisos y enlaces al código fuente en <a href="LICENSES/NOTICE.md">LICENSES</a>.</p>
+  </section>
+</main>
+<div id="stage" hidden><div id="game"></div></div>
+<button id="closeGame" type="button" hidden>← Salir</button>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const say = (text, tone = '') => { $('msg').textContent = text; $('msg').dataset.tone = tone; };
+
+  // Threads in WebAssembly need SharedArrayBuffer, which browsers only expose to cross-origin isolated
+  // pages. Static hosts can't send the COOP/COEP headers, so Ranura's service worker adds them to this
+  // page; the first visit reloads once so the worker can take control.
+  if (!window.crossOriginIsolated && 'serviceWorker' in navigator && isSecureContext) {
+    let tried = false;
+    try { tried = sessionStorage.getItem('ranura-coi') === '1'; } catch {}
+    if (!tried) {
+      try { sessionStorage.setItem('ranura-coi', '1'); } catch {}
+      say('Preparando el modo PSP…');
+      try {
+        await navigator.serviceWorker.register('sw.js');
+        await navigator.serviceWorker.ready;
+        location.reload();
+        return;
+      } catch {}
+    }
+  }
+  try { sessionStorage.removeItem('ranura-coi'); } catch {}
+
+  let webgl2 = false;
+  try { webgl2 = !!document.createElement('canvas').getContext('webgl2'); } catch {}
+  const checks = [
+    ['Página aislada (necesaria para hilos)', window.crossOriginIsolated === true],
+    ['SharedArrayBuffer', typeof SharedArrayBuffer === 'function'],
+    ['WebGL 2', webgl2],
+    ['WebAssembly', typeof WebAssembly === 'object'],
+  ];
+  $('checks').replaceChildren(...checks.map(([label, ok]) => {
+    const li = document.createElement('li');
+    li.className = ok ? 'ok' : 'bad';
+    const d = document.createElement('span'); d.className = 'dot';
+    const t = document.createElement('span'); t.textContent = `${label}: ${ok ? 'sí' : 'no'}`;
+    li.append(d, t);
+    return li;
+  }));
+  const ready = checks.every(([, ok]) => ok);
+  $('slot').setAttribute('aria-disabled', String(!ready));
+  if (!ready) {
+    say('Este navegador no cumple los requisitos para el núcleo de PSP. Usa PPSSPP de la App Store.', 'error');
+    return;
+  }
+
+  $('iso').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (!['iso', 'cso', 'pbp', 'elf', 'prx', 'chd'].includes(ext)) {
+      say('Ese archivo no es un juego de PSP (.iso, .cso, .pbp o .elf). Los juegos de GB, GBC y GBA van en Ranura.', 'error');
+      return;
+    }
+    const gb = file.size / 1024 ** 3;
+    say(gb > 1 ? `Cargando ${file.name} (${gb.toFixed(1)} GB). Puede tardar y, si el iPhone se queda sin memoria, la página se recargará.` : `Cargando ${file.name}…`, 'ok');
+    window.EJS_player = '#game';
+    window.EJS_core = 'psp';
+    window.EJS_threads = true;
+    window.EJS_DEBUG_XX = true; // load EmulatorJS from its (bundled) source files
+    window.EJS_pathtodata = 'psp/ejs/';
+    window.EJS_gameUrl = file; // EmulatorJS reads the File directly; nothing is uploaded anywhere
+    window.EJS_gameName = file.name.replace(/\.[^.]+$/, '');
+    window.EJS_startOnLoaded = true;
+    window.EJS_color = '#ff5f45';
+    window.EJS_language = 'es-ES';
+    $('home').hidden = true;
+    $('stage').hidden = false;
+    $('closeGame').hidden = false;
+    const s = document.createElement('script');
+    s.src = 'psp/ejs/loader.js';
+    document.body.append(s);
+  });
+  $('closeGame').addEventListener('click', () => location.reload());
+  say('Listo. Elige un juego de PSP.');
+})();
+</script>
+</body>
+</html>

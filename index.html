@@ -419,6 +419,7 @@ button { cursor: pointer; }
   font-size: 14.5px; color: var(--ink-2);
 }
 .notes li b { display: block; color: var(--ink); font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+.psp-link { display: inline-block; margin-top: 6px; color: var(--coral-hi); font-weight: 600; }
 .note-ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: rgba(170,179,255,.12); color: var(--lilac); }
 .note-ico.warm { background: rgba(255,95,69,.14); color: var(--coral-hi); }
 .note-ico.cool { background: rgba(92,224,166,.12); color: var(--mint); }
@@ -863,7 +864,7 @@ input[type="range"] { width: min(220px, 55vw); accent-color: var(--coral); }
       <li><span class="note-ico cool" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4 4 0 0 1-.5 8.5Z"/><path d="m9.5 13.5 2 2 3.5-4"/></svg></span><span><b>La partida se guarda sola</b>Cada vez que guardas dentro del juego queda guardada en el dispositivo. Abierta dentro de Claude, también se respalda en tu cuenta.</span></li>
       <li><span class="note-ico" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></span><span><b>Si iOS borra los datos</b>Restaura tu respaldo .zip y vuelve a insertar tus juegos. Dentro de Claude, la partida también regresa desde tu cuenta.</span></li>
       <li><span class="note-ico" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><span><b>¿Te pasas a Delta?</b>Exporta la partida, toca el .zip en Archivos para sacar el .sav y en Delta mantén presionado el juego para importarlo.</span></li>
-      <li><span class="note-ico warm" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="8" cy="12" r="1.5"/><path d="M15 11h3M16.5 9.5v3"/></svg></span><span><b>PSP no corre aquí</b>Para God of War y otros juegos de PSP instala PPSSPP desde la App Store.</span></li>
+      <li><span class="note-ico warm" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="8" cy="12" r="1.5"/><path d="M15 11h3M16.5 9.5v3"/></svg></span><span><b>PSP</b>Para God of War, lo recomendable es PPSSPP de la App Store. <a class="psp-link" id="pspLink" href="psp.html" hidden>Probar PSP experimental en el navegador</a></span></li>
     </ul>
   </section>
   <p class="hint credits">Motor de emulación: mGBA compilado a WebAssembly (licencia MPL-2.0). Ranura no incluye juegos.</p>
@@ -1121,7 +1122,9 @@ const ascii = (b, at, n) => {
 };
 class RomError extends Error {}
 const OTHER_SYSTEMS = {
-  psp: 'Es un juego de PSP. Ranura corre GB, GBC y GBA; para PSP usa PPSSPP desde la App Store.',
+  psp: IN_CLAUDE
+    ? 'Es un juego de PSP. Ranura corre GB, GBC y GBA; para PSP usa PPSSPP desde la App Store.'
+    : 'Es un juego de PSP. Ábrelo en «PSP experimental» (abajo, en Cómo funciona) o, para jugar en serio, en PPSSPP de la App Store.',
   nds: 'Es un juego de Nintendo DS. Ranura solo corre GB, GBC y GBA.',
   nes: 'Es un juego de NES. Ranura solo corre GB, GBC y GBA.',
   snes: 'Es un juego de Super Nintendo. Ranura solo corre GB, GBC y GBA.',
@@ -2127,6 +2130,7 @@ if (!IN_CLAUDE && 'serviceWorker' in navigator && (location.protocol === 'https:
   $('installHint').hidden = standalone || !/iPhone|iPad|iPod/.test(navigator.userAgent);
 }
 if (!IN_CLAUDE) { try { navigator.storage?.persist?.(); } catch {} }
+$('pspLink').hidden = IN_CLAUDE;
 
 const boot = (data) => {
   renderShelf();
