@@ -1,6 +1,6 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = 'c9d98fb4dbed';
+const VERSION = '60a254f9cf39';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
@@ -14,6 +14,33 @@ function isolate(res) {
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+// Games live in the shelf's IndexedDB as Blobs (on disk). The worker keeps a handle to the one in use
+// and returns only the requested slice, so the page never holds a whole disc in memory.
+const discs = new Map();
+async function discBlob(id) {
+  if (discs.has(id)) return discs.get(id);
+  const db = await new Promise((res, rej) => { const r = indexedDB.open('ranura'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  try {
+    if (!db.objectStoreNames.contains('roms')) return null;
+    const blob = await new Promise((res, rej) => { const g = db.transaction('roms').objectStore('roms').get(id); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+    if (!(blob instanceof Blob)) return null;
+    if (discs.size > 2) discs.clear();
+    discs.set(id, blob);
+    return blob;
+  } finally { db.close(); }
+}
+async function discPiece(url) {
+  try {
+    const blob = await discBlob(url.pathname.split('/').pop());
+    if (!blob) return new Response('', { status: 404 });
+    const offset = Math.max(0, Number(url.searchParams.get('o')) || 0);
+    const length = Math.min(Math.max(0, Number(url.searchParams.get('n')) || 0), 8 * 1024 * 1024);
+    return new Response(blob.slice(offset, offset + length), { headers: { 'content-type': 'text/plain; charset=x-user-defined', 'cache-control': 'no-store' } });
+  } catch (e) {
+    return new Response('', { status: 500 });
+  }
 }
 
 self.addEventListener('install', (event) => {
@@ -34,6 +61,11 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  // A game being played asks for one piece of its file at a time (see consola.html).
+  if (url.origin === self.location.origin && /\/disc\/[a-z0-9]+$/i.test(url.pathname)) {
+    event.respondWith(discPiece(url));
+    return;
+  }
   // Everything the PSP engine needs is hosted here; its update check and CDN fallback stay local.
   if (url.hostname === 'cdn.emulatorjs.org') {
     event.respondWith(new Response('', { status: 404 }));

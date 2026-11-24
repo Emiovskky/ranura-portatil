@@ -39,6 +39,15 @@ p { margin: 0; color: var(--ink-2); }
 #game { width: 100%; height: 100%; }
 /* top centre: the emulator's own touch controls use the corners */
 #closeGame { position: fixed; z-index: 20; top: max(4px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); border: 2px solid var(--line); border-radius: 4px; padding: 4px 10px; background: rgba(29, 20, 68, .82); color: var(--ink-2); font: 700 13px var(--mono); }
+/* shown over the game when the engine stops */
+#crash { position: fixed; z-index: 30; left: 50%; bottom: max(14px, env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(460px, calc(100% - 24px)); display: grid; gap: 10px; padding: 20px 16px 14px; background: var(--panel); border: 3px solid var(--line); border-radius: 8px; box-shadow: inset 0 0 0 3px var(--pink), inset 0 0 0 6px var(--panel), 5px 5px 0 var(--line); }
+#crash h2 { margin: 0; font: 700 17px/1.2 var(--mono); }
+#crash p { font-size: 14px; }
+#crash .row { display: flex; flex-wrap: wrap; gap: 8px; }
+#crash button, #crash a { font: 700 14px var(--font); border: 2px solid var(--line); border-radius: 4px; padding: 9px 12px; box-shadow: 2px 2px 0 var(--line); text-decoration: none; cursor: pointer; }
+#crash button { background: var(--lime); color: var(--line); }
+#crash a { background: #33246a; color: var(--ink); }
+#crash button:focus-visible, #crash a:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; } }
 </style>
 </head>
@@ -54,6 +63,15 @@ p { margin: 0; color: var(--ink-2); }
 </main>
 <div id="stage" hidden><div id="game"></div></div>
 <button id="closeGame" type="button" hidden>← Salir</button>
+<div id="crash" role="alert" hidden>
+  <span class="tag">MOTOR DETENIDO</span>
+  <h2 id="crashTitle">El motor se detuvo</h2>
+  <p id="crashText"></p>
+  <div class="row">
+    <button id="crashSwap" type="button" hidden>Probar el otro motor</button>
+    <a href="./">Volver al estante</a>
+  </div>
+</div>
 
 <script>
 (async () => {
@@ -86,6 +104,14 @@ p { margin: 0; color: var(--ink-2); }
   if (!meta || !(blob instanceof Blob)) { fail('Ese juego ya no está en el estante. Vuelve e insértalo de nuevo.'); return; }
   const sys = SYSTEMS[meta.system];
   if (!sys) { fail('Ranura no tiene un motor para esa consola.'); return; }
+  // Nintendo 64 has two engines. EmulatorJS picks one by browser (ParaLLEl on iPhone Safari, Mupen64Plus
+  // elsewhere); the player's own choice for a game, made from the notice below, wins over that.
+  const ENGINES = { N64: { mupen64plus_next: 'Mupen64Plus', parallel_n64: 'ParaLLEl' } };
+  const engines = ENGINES[meta.system] || null;
+  const engineKey = 'ranura:motor:' + id;
+  let chosen = '';
+  try { chosen = localStorage.getItem(engineKey) || ''; } catch {}
+  if (!engines || !engines[chosen]) chosen = '';
   $('sysTag').textContent = sys.label;
   $('gameName').textContent = meta.name;
   document.title = `${meta.name} · Ranura`;
@@ -108,10 +134,79 @@ p { margin: 0; color: var(--ink-2); }
   try { webgl2 = !!document.createElement('canvas').getContext('webgl2'); } catch {}
   if (!webgl2 && ['PSP', 'N64', 'NDS', 'PS1'].includes(meta.system)) { fail('Este navegador no tiene WebGL 2, que ese motor necesita.'); return; }
 
-  const gb = blob.size / 1024 ** 3;
-  $('msg').textContent = gb > 0.7
-    ? `Cargando ${gb.toFixed(1)} GB en memoria. Puede tardar; si el iPhone se queda sin memoria, la página se recargará.`
-    : 'Encendiendo…';
+  // Big games are never loaded whole (a phone browser kills a page that holds a 1.5 GB disc in memory).
+  // Instead the engine's file is a window onto the stored game: each piece it asks for is read, on the
+  // spot, from the shelf's storage (the stored game lives on disk, not in memory).
+  const query = new URLSearchParams(location.search);
+  const CHUNK = Math.max(4096, Number(query.get('chunk')) || 2 * 1024 * 1024);
+  const KEEP = 24; // pieces kept in memory at most (48 MB with the default size)
+  const lazyStats = (window.__lazy = { on: false, via: '', requests: 0, bytes: 0 });
+  // A synchronous request, on purpose: the engine reads its files synchronously. A page may not ask for
+  // binary data that way, so the bytes travel as text in a charset that maps every byte to one character.
+  const pull = (url) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', url, false);
+    x.overrideMimeType('text/plain; charset=x-user-defined');
+    x.send();
+    if (x.status !== 200) throw new Error('disc read failed: ' + x.status);
+    const text = x.responseText;
+    const out = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i) & 0xff;
+    return out;
+  };
+  const WAYS = {
+    // straight from the stored game: a temporary address for just the slice that is needed
+    blob: (offset, length) => {
+      const url = URL.createObjectURL(blob.slice(offset, offset + length));
+      try { return pull(url); } finally { URL.revokeObjectURL(url); }
+    },
+    // through Ranura's service worker, which reads the same slice from the shelf's storage
+    worker: (offset, length) => pull(`disc/${id}?o=${offset}&n=${length}`),
+  };
+  let way = null;
+  const readPiece = (offset, length) => {
+    length = Math.max(0, Math.min(length, blob.size - offset));
+    if (!length) return new Uint8Array(0);
+    let out = way(offset, length);
+    if (out.length !== length) {
+      // A slice that happens to begin with a Unicode byte-order mark is decoded as another charset.
+      // One byte alone can never be a mark, so read the first byte apart from the rest.
+      if (length === 1) throw new Error('disc read came back short');
+      const head = readPiece(offset, 1);
+      const rest = readPiece(offset + 1, length - 1);
+      out = new Uint8Array(length);
+      out.set(head, 0); out.set(rest, 1);
+      return out;
+    }
+    lazyStats.requests++; lazyStats.bytes += out.length;
+    return out;
+  };
+  const same = async (offset, length) => {
+    const got = readPiece(offset, length);
+    const want = new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer());
+    return got.length === want.length && got.every((v, i) => v === want[i]);
+  };
+  lazyStats.verify = (offset, length) => same(offset, length).catch(() => false); // used by the tests
+  let lazy = blob.size > 48 * 1024 * 1024 || query.get('lazy') === '1';
+  if (lazy) {
+    lazy = false;
+    const n = Math.min(4096, blob.size);
+    const forced = query.get('via');
+    for (const name of forced ? [forced] : ['blob', 'worker']) {
+      if (!WAYS[name]) continue;
+      way = WAYS[name];
+      let ok = false;
+      try { ok = (await same(0, n)) && (await same(Math.max(0, blob.size - n), n)); } catch {}
+      if (ok) { lazy = true; lazyStats.via = name; break; }
+    }
+    lazyStats.requests = 0; lazyStats.bytes = 0;
+    if (!lazy && blob.size > 600 * 1024 * 1024) {
+      fail('Este navegador no deja leer el juego por partes y pesa demasiado para cargarlo entero en memoria. Cierra y abre la app e inténtalo de nuevo.');
+      return;
+    }
+  }
+  lazyStats.on = lazy;
+  $('msg').textContent = 'Encendiendo…';
 
   // The file keeps its real extension (the engine picks the format from it) and gets the game's id in its
   // name, so saves made by two different games can never land in the same file.
@@ -120,11 +215,81 @@ p { margin: 0; color: var(--ink-2); }
   const clean = (s) => s.replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
   const fileName = `${clean(dot > 0 ? original.slice(0, dot) : original)} [${id.slice(0, 8)}]${dot > 0 ? original.slice(dot) : ''}`;
   window.EJS_player = '#game';
-  window.EJS_core = sys.core;
+  window.EJS_core = chosen || sys.core;
   window.EJS_threads = !!sys.threads;
   window.EJS_DEBUG_XX = true; // load EmulatorJS from its bundled source files
   window.EJS_pathtodata = 'psp/ejs/';
-  window.EJS_gameUrl = new File([blob], fileName); // read straight from the shelf; nothing is uploaded
+  if (lazy) {
+    const pieces = new Map(); // piece index -> bytes, oldest first
+    const piece = (i) => {
+      let p = pieces.get(i);
+      if (p) { pieces.delete(i); pieces.set(i, p); return p; }
+      p = readPiece(i * CHUNK, Math.min(CHUNK, blob.size - i * CHUNK));
+      pieces.set(i, p);
+      if (pieces.size > KEEP) pieces.delete(pieces.keys().next().value);
+      return p;
+    };
+    // Puts a read-only file at `path` whose bytes are fetched piece by piece as the engine reads them.
+    const mount = (FS, path) => {
+      try { if (FS.analyzePath(path).exists) FS.unlink(path); } catch {}
+      const slash = path.lastIndexOf('/');
+      const node = FS.createFile(slash > 0 ? path.slice(0, slash) : '/', path.slice(slash + 1), {}, true, false);
+      node.contents = null;
+      Object.defineProperty(node, 'usedBytes', { get: () => blob.size, set() {}, configurable: true });
+      const ops = Object.assign({}, node.stream_ops);
+      const trace = query.get('trace') === '1' ? (lazyStats.trace = { reads: [], far: '' }) : null; // for the tests
+      ops.read = (stream, buffer, offset, length, position) => {
+        if (trace) {
+          if (trace.reads.length < 400) trace.reads.push([position, length]);
+          if (!trace.far && position > 64 * 1024 * 1024) trace.far = String(new Error().stack).slice(0, 1800);
+        }
+        if (position >= blob.size) return 0;
+        const total = Math.min(length, blob.size - position);
+        let done = 0;
+        while (done < total) {
+          const at = position + done;
+          const index = Math.floor(at / CHUNK);
+          const p = piece(index);
+          const inside = at - index * CHUNK;
+          const n = Math.min(total - done, p.length - inside);
+          if (n <= 0) break;
+          buffer.set(p.subarray(inside, inside + n), offset + done);
+          done += n;
+        }
+        return done;
+      };
+      ops.write = () => { throw new FS.ErrnoError(63); }; // the game image is read-only
+      ops.mmap = () => { throw new FS.ErrnoError(43); };
+      node.stream_ops = ops;
+      lazyStats.mounted = path;
+      return true;
+    };
+    // EmulatorJS is handed a tiny stand-in instead of the game. It announces its file system just before
+    // it writes the game into it; from then on, the write of the stand-in is swapped for the mount above.
+    // Nothing inside EmulatorJS is changed for this, so it also works with a copy of the engine that the
+    // phone cached on an earlier visit.
+    const STANDIN = new TextEncoder().encode(('RANURA: este archivo se lee por partes desde el estante. ' + id).padEnd(96, '.'));
+    const hookFS = (FS) => {
+      if (FS.__ranura) return;
+      FS.__ranura = true;
+      const write = FS.writeFile;
+      FS.writeFile = function (path, data, opts) {
+        if (!lazyStats.mounted && data && typeof data !== 'string' && data.length === STANDIN.length && STANDIN.every((v, i) => data[i] === v)) { mount(FS, path); return; }
+        return write.apply(this, arguments);
+      };
+      lazyStats.hooked = true;
+    };
+    let ejs;
+    Object.defineProperty(window, 'EJS_emulator', {
+      configurable: true, enumerable: true, get: () => ejs,
+      set: (v) => { ejs = v; try { v.on('saveDatabaseLoaded', hookFS); } catch {} },
+    });
+    // If the swap did not happen the engine is holding the stand-in, not the game: say so instead of a black screen.
+    window.EJS_onGameStart = () => { if (!lazyStats.mounted) fail('No se pudo conectar el juego con el motor para leerlo por partes. Cierra y abre la app e inténtalo de nuevo.'); };
+    window.EJS_gameUrl = new File([STANDIN], fileName);
+  } else {
+    window.EJS_gameUrl = new File([blob], fileName); // small games are read straight from the shelf
+  }
   window.EJS_gameName = clean(meta.name);
   window.EJS_startOnLoaded = true;
   window.EJS_color = sys.color;
@@ -134,6 +299,32 @@ p { margin: 0; color: var(--ink-2); }
     ppsspp_internal_resolution: '480x272', ppsspp_auto_frameskip: 'enabled', ppsspp_frameskip: '1',
     ppsspp_lazy_texture_caching: 'enabled', ppsspp_spline_quality: 'Low',
   } : {});
+  // A WebAssembly error means the engine is gone: the picture freezes and nothing says why. Say it.
+  let crashed = false;
+  const onCrash = (err) => {
+    const text = String((err && (err.message || err)) || '');
+    if (crashed || !/RuntimeError|out of bounds|unreachable|Aborted|out of memory|worker sent an error/i.test(String(err && err.name) + ' ' + text)) return;
+    crashed = true;
+    lazyStats.crash = text.slice(0, 200);
+    let current = '';
+    try { current = window.EJS_emulator.getCore(); } catch {}
+    const other = engines ? Object.keys(engines).find((k) => k !== current) : '';
+    if (engines && engines[current] && other) {
+      $('crashText').textContent = chosen
+        ? `El motor ${engines[current]} tampoco pudo con este juego en este navegador. Puedes volver al otro.`
+        : `El motor ${engines[current]} no pudo con este juego. Nintendo 64 tiene otro, ${engines[other]}: pruébalo.`;
+      $('crashSwap').textContent = chosen ? `Volver a ${engines[other]}` : `Probar con ${engines[other]}`;
+      $('crashSwap').hidden = false;
+      $('crashSwap').onclick = () => { try { localStorage.setItem(engineKey, other); } catch {} location.reload(); };
+    } else if (meta.system === 'PSP') {
+      $('crashText').textContent = 'El motor de PSP no pudo con este juego en el navegador (memoria o potencia). En iPhone la opción estable es PPSSPP, de la App Store, con este mismo archivo.';
+    } else {
+      $('crashText').textContent = 'El motor no pudo con este juego. Si el archivo funciona en otro emulador, es un límite del motor web.';
+    }
+    $('crash').hidden = false;
+  };
+  window.addEventListener('error', (ev) => onCrash(ev.error || ev.message));
+  window.addEventListener('unhandledrejection', (ev) => onCrash(ev.reason));
   $('home').hidden = true;
   $('stage').hidden = false;
   $('closeGame').hidden = false;

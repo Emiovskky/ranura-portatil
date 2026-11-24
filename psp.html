@@ -139,6 +139,10 @@ p { margin: 0; color: var(--ink-2); max-width: 65ch; }
       say('Ese archivo no es un juego de PSP (.iso, .cso, .pbp o .elf). Los juegos de GB, GBC y GBA van en Ranura.', 'error');
       return;
     }
+    if (file.size > 600 * 1024 * 1024) {
+      say('Ese juego pesa demasiado para abrirlo sin guardarlo. Agrégalo al estante de Ranura (Insertar cartucho): desde ahí se lee por partes y no llena la memoria.', 'error');
+      return;
+    }
     const gb = file.size / 1024 ** 3;
     say(gb > 1 ? `Cargando ${file.name} (${gb.toFixed(1)} GB). Puede tardar y, si el iPhone se queda sin memoria, la página se recargará.` : `Cargando ${file.name}…`, 'ok');
     window.EJS_player = '#game';
