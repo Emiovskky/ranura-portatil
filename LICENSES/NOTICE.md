@@ -25,7 +25,13 @@
 - `index.html`, `sw.js` y los cartuchos de prueba incluidos (homebrew escrito para Ranura) no contienen
   código ni recursos de juegos comerciales. Ranura no incluye juegos.
 
-## Modo PSP experimental (`psp.html`, carpeta `psp/ejs/`)
+## Otras consolas y PSP (`consola.html`, `psp.html`, carpeta `psp/ejs/`)
+- Núcleos de `@emulatorjs/core-*@4.2.3` sin modificar: fceumm (NES, GPL-2.0), snes9x (SNES, licencia Snes9x:
+  uso no comercial), genesis_plus_gx (Mega Drive, licencia propia: uso no comercial), mupen64plus_next (N64, GPL-2.0),
+  melonDS (DS, GPL-3.0), pcsx_rearmed (PS1, GPL-2.0). Fuentes: https://github.com/EmulatorJS (un repositorio por núcleo).
+  Ranura es un proyecto personal sin fines comerciales.
+- `psp/ejs/src/emulator.js` está **modificado por Ranura**: entrega la imagen del juego al sistema de archivos sin
+  copiarla de más (menos memoria con discos grandes). El archivo publicado es el propio código fuente.
 - **EmulatorJS 4.2.3** — https://github.com/EmulatorJS/EmulatorJS — licencia GPL-3.0 (texto en `GPL-3.0.txt`).
   Archivos de `@emulatorjs/emulatorjs@4.2.3` sin modificar (`loader.js`, `src/`, `compression/`, `localization/`).
 - **PPSSPP** (núcleo `ppsspp` de EmulatorJS, `@emulatorjs/core-ppsspp@4.2.3`) — https://github.com/hrydgard/ppsspp —

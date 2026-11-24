@@ -19,3 +19,7 @@ guardar una copia en Archivos o iCloud Drive.
 `psp.html` carga PPSSPP compilado para la web (EmulatorJS, GPL-3.0; núcleo PPSSPP, GPL-2.0+). Es un
 experimento sin probar con juegos comerciales ni en Safari de iPhone; para jugar en serio usa PPSSPP de la
 App Store. Avisos y enlaces al código fuente en [`LICENSES/NOTICE.md`](LICENSES/NOTICE.md).
+
+## Más consolas
+`consola.html` abre con EmulatorJS los juegos de NES, SNES, Mega Drive, N64, DS, PS1 y PSP que guardes en el
+estante. Las de 3D son experimentales. Licencias de cada núcleo en [`LICENSES/NOTICE.md`](LICENSES/NOTICE.md).

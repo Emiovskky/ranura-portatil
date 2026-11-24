@@ -1,11 +1,11 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = '1172c6ff0fc0';
+const VERSION = 'd17bcc62676f';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
 const PSP_CACHE = 'ranura-psp-4.2.3';
-const ASSETS = ["./","index.html","psp.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
+const ASSETS = ["./","index.html","psp.html","consola.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
 
 // psp.html needs SharedArrayBuffer, which browsers only allow on cross-origin isolated pages.
 // Static hosts cannot send those headers, so the worker adds them to that page.
@@ -40,11 +40,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin === self.location.origin) {
-    if (req.mode === 'navigate' && url.pathname.endsWith('/psp.html')) {
+    if (req.mode === 'navigate' && /\/(psp|consola)\.html$/.test(url.pathname)) {
+      const page = url.pathname.split('/').pop();
       event.respondWith(
         Promise.race([fetch(req), timeout(4000)])
-          .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put('psp.html', copy)); return res; })
-          .catch(() => caches.match('psp.html', { ignoreSearch: true }))
+          .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(page, copy)); return res; })
+          .catch(() => caches.match(page, { ignoreSearch: true }))
           .then(isolate),
       );
       return;

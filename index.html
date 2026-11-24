@@ -934,6 +934,22 @@ body::after { display: none; }
 .cart[data-sys="GB"] { --cart-mid: #cfcbc2; }
 .cart[data-sys="GBC"] { --cart-mid: #23b3a8; }
 .cart[data-sys="PSP"] { --cart-mid: #2b2b34; }
+.cart[data-sys="NES"] { --cart-mid: #8d8f9c; }
+.cart[data-sys="SNES"] { --cart-mid: #b7b1cb; --cart-ink: #2a2440; }
+.cart[data-sys="MD"] { --cart-mid: #25252d; }
+.cart[data-sys="N64"] { --cart-mid: #5a5e6e; }
+.cart[data-sys="NDS"] { --cart-mid: #d9dbe6; --cart-ink: #2a2c3c; }
+.cart[data-sys="PS1"] { --cart-mid: #c5c7d4; --cart-ink: #2a2c3c; }
+.cart[data-sys="SNES"] .cart-save, .cart[data-sys="SNES"] .cart-more, .cart[data-sys="NDS"] .cart-save, .cart[data-sys="NDS"] .cart-more, .cart[data-sys="PS1"] .cart-save, .cart[data-sys="PS1"] .cart-more { color: var(--cart-ink); }
+.cart[data-sys="PS1"] .cart-body { clip-path: none; border-radius: 10px; padding-top: 14px; }
+.cart[data-sys="PS1"] .cart-body::before, .cart[data-sys="PS1"] .cart-body::after { display: none; }
+.hero-chips span:nth-child(4) { background: #e0483e; }
+.hero-chips span:nth-child(5) { background: #cdb8ff; }
+.hero-chips span:nth-child(6) { background: #6f8cff; }
+.hero-chips span:nth-child(7) { background: #5fd68a; }
+.hero-chips span:nth-child(8) { background: #e2e4ee; }
+.hero-chips span:nth-child(9) { background: #b9bccb; }
+.hero-chips span:nth-child(10) { background: #ffd84d; }
 .cart-body { background: var(--cart-mid); box-shadow: none; border-radius: 0 0 6px 6px; transition: transform .1s; }
 .cart-body::before { background: repeating-linear-gradient(90deg, rgba(0,0,0,.28) 0 3px, transparent 3px 7px); border-radius: 0; }
 .cart-body::after { background: var(--line); box-shadow: none; border-radius: 0; }
@@ -1133,7 +1149,7 @@ body::after { display: none; }
       <h1 id="heroTitle">¡Inserta un cartucho y <em>juega!</em></h1>
       <p id="dialogText"></p>
       <button class="next" id="dialogNext" type="button" aria-label="Siguiente consejo">▼</button>
-      <div class="hero-chips" aria-label="Sistemas compatibles"><span>GBA</span><span>GBC</span><span>GB</span></div>
+      <div class="hero-chips" aria-label="Sistemas compatibles"><span>GBA</span><span>GBC</span><span>GB</span><span>NES</span><span>SNES</span><span>MD</span><span>N64</span><span>DS</span><span>PS1</span><span>PSP</span></div>
     </div>
   </section>
 
@@ -1179,7 +1195,7 @@ body::after { display: none; }
       <li><span class="note-ico cool" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4 4 0 0 1-.5 8.5Z"/><path d="m9.5 13.5 2 2 3.5-4"/></svg></span><span><b>La partida se guarda sola</b>Cada vez que guardas dentro del juego queda guardada en el dispositivo. Abierta dentro de Claude, también se respalda en tu cuenta.</span></li>
       <li><span class="note-ico" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg></span><span><b>Si iOS borra los datos</b>Restaura tu respaldo .zip y vuelve a insertar tus juegos. Dentro de Claude, la partida también regresa desde tu cuenta.</span></li>
       <li><span class="note-ico" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h13l-3-3M20 17H7l3 3"/></svg></span><span><b>¿Te pasas a Delta?</b>Exporta la partida, toca el .zip en Archivos para sacar el .sav y en Delta mantén presionado el juego para importarlo.</span></li>
-      <li><span class="note-ico warm" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="8" cy="12" r="1.5"/><path d="M15 11h3M16.5 9.5v3"/></svg></span><span><b>PSP</b>Para God of War, lo recomendable es PPSSPP de la App Store. <a class="psp-link" id="pspLink" href="psp.html" hidden>Probar PSP experimental en el navegador</a></span></li>
+      <li><span class="note-ico warm" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="8" cy="12" r="1.5"/><path d="M15 11h3M16.5 9.5v3"/></svg></span><span><b>Más consolas</b>En la app instalada también corren NES, SNES, Mega Drive, N64, DS, PS1 y PSP. Las de 3D (N64, DS, PS1, PSP) son experimentales: dependen de la potencia del teléfono. Para God of War usa PPSSPP de la App Store. <a class="psp-link" id="pspLink" href="psp.html" hidden>Abrir un juego de PSP sin guardarlo</a></span></li>
     </ul>
   </section>
   <p class="hint credits">Motor de emulación: mGBA compilado a WebAssembly (licencia MPL-2.0). Ranura no incluye juegos.</p>
@@ -1715,14 +1731,14 @@ function svgUse(id) {
 function cartItem(m, rec, hasBackup, featured, art) {
   const li = el('li', 'cart' + (featured ? ' featured' : ''));
   li.dataset.sys = m.system;
-  const isPsp = m.system === 'PSP';
+  const isPsp = !!CONSOLES[m.system]; // runs in the console page, not in the built-in player
   const body = el('button', 'cart-body');
   body.type = 'button';
   body.setAttribute('aria-label', `Jugar ${m.name}`);
   const sticker = el('span');
   paintSticker(sticker, m);
   const top = el('span', 'sticker-top');
-  top.append(el('span', 'sys', m.system), el('span', 'cart-code', m.demo ? m.code : [m.code, m.title].filter(Boolean).join(' · ')));
+  top.append(el('span', 'sys', CONSOLES[m.system]?.label || m.system), el('span', 'cart-code', m.demo ? m.code : [m.code, m.title].filter(Boolean).join(' · ')));
   if (art) {
     sticker.classList.add('has-cover');
     const box = el('span', 'cover');
@@ -1743,7 +1759,7 @@ function cartItem(m, rec, hasBackup, featured, art) {
     top.append(el('span', 'stat', mins >= 60 ? `${Math.floor(mins / 60)}H ${mins % 60}M` : `${mins} MIN`));
   }
   sticker.append(top, el('span', 'cart-name', m.name));
-  const line = isPsp ? { state: 'none', text: `PSP experimental · ${m.size >= 1024 ** 3 ? (m.size / 1024 ** 3).toFixed(1) + ' GB' : m.size >= 1024 ** 2 ? Math.round(m.size / 1024 ** 2) + ' MB' : Math.max(1, Math.round(m.size / 1024)) + ' KB'}` } : saveLine(rec, m.id);
+  const line = isPsp ? { state: 'none', text: `${CONSOLES[m.system].note} · ${m.size >= 1024 ** 3 ? (m.size / 1024 ** 3).toFixed(1) + ' GB' : m.size >= 1024 ** 2 ? Math.round(m.size / 1024 ** 2) + ' MB' : Math.max(1, Math.round(m.size / 1024)) + ' KB'}` } : saveLine(rec, m.id);
   const foot = el('span', 'cart-foot');
   const save = el('span', 'cart-save');
   save.dataset.state = line.state;
@@ -1752,7 +1768,7 @@ function cartItem(m, rec, hasBackup, featured, art) {
   playPill.append(svgUse('i-play'), document.createTextNode(rec ? 'Seguir' : 'Jugar'));
   foot.append(save, playPill);
   body.append(sticker, foot);
-  body.addEventListener('click', () => (isPsp ? openPsp(m) : play(m.id, body)));
+  body.addEventListener('click', () => (isPsp ? openConsole(m) : play(m.id, body)));
   const main = el('div', 'cart-main');
   main.append(body);
   li.append(main);
@@ -1805,14 +1821,24 @@ function showMsg(text, tone = '') {
 async function addRomFile(file) {
   const extOf = (n) => (n.includes('.') ? n.split('.').pop() : '').toLowerCase();
   if (file.size === 0) { showMsg('Ese archivo está vacío (0 bytes). Vuelve a copiarlo al iPhone.', 'error'); return; }
-  if (['iso', 'cso', 'pbp'].includes(extOf(file.name))) { await addPspFile(file); return; }
+  const ext0 = extOf(file.name);
+  if (CONSOLE_EXTS.includes(ext0)) {
+    const hit = detectConsole(new Uint8Array(await file.slice(0, 0x9400).arrayBuffer()), ext0, file.size);
+    if (hit?.error) { showMsg(hit.error, 'error'); return; }
+    if (hit?.system) { await addConsoleFile(file, hit.system, file.name); return; }
+  }
   showMsg(`Leyendo ${file.name}…`);
   let bytes = new Uint8Array(await file.arrayBuffer());
   let fname = file.name;
   try {
-    const r = await extractRom(bytes, ['.gba', '.gbc', '.gb', '.sgb']);
+    const r = await extractRom(bytes, ['.gba', '.gbc', '.gb', '.sgb', '.nes', '.sfc', '.smc', '.md', '.gen', '.smd', '.z64', '.n64', '.v64', '.nds']);
     bytes = r.bytes;
     if (r.name) fname = r.name.split('/').pop();
+    if (r.name && CONSOLE_EXTS.includes(extOf(fname))) {
+      const hit = detectConsole(bytes.subarray(0, 0x9400), extOf(fname), bytes.length);
+      if (hit?.error) { showMsg(hit.error, 'error'); return; }
+      if (hit?.system) { await addConsoleFile(new File([bytes], fname), hit.system, fname); return; }
+    }
   } catch {
     showMsg('No se pudo abrir el .zip: está dañado o usa un formato no compatible. Descomprímelo en Archivos y elige el juego directamente.', 'error');
     return;
@@ -1890,41 +1916,74 @@ $('coverInput').addEventListener('change', async (e) => {
   }
 });
 
-// ------------------------------------------------------------------- PSP
-// PSP discs join the shelf, but they run in a separate page: the PSP engine needs an isolated page
-// (SharedArrayBuffer), which the rest of the app does not use.
-function pspKind(head, ext) {
-  if (startsWith(head, [0x43, 0x49, 0x53, 0x4f])) return 'CSO';
-  if (startsWith(head, [0x00, 0x50, 0x42, 0x50])) return 'PBP';
-  if (head.length > 0x8050 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], 0x8001)) return /PSP/i.test(ascii(head, 0x8008, 72)) ? 'ISO' : 'OTHER';
+// ---------------------------------------------------------------- consoles
+// Consoles beyond GB/GBC/GBA run on EmulatorJS cores in their own page (consola.html). The shelf only
+// has to recognise the file, keep it (as a Blob, on disk) and open that page.
+const CONSOLES = {
+  NES: { label: 'NES', note: 'NES' },
+  SNES: { label: 'SNES', note: 'Super Nintendo' },
+  MD: { label: 'MD', note: 'Mega Drive' },
+  N64: { label: 'N64', note: 'N64 experimental' },
+  NDS: { label: 'DS', note: 'DS experimental' },
+  PS1: { label: 'PS1', note: 'PS1 experimental' },
+  PSP: { label: 'PSP', note: 'PSP experimental' },
+};
+const CONSOLE_EXTS = ['nes', 'sfc', 'smc', 'md', 'gen', 'smd', 'z64', 'n64', 'v64', 'nds', 'iso', 'cso', 'pbp', 'chd', 'bin', 'img', 'cue', 'exe'];
+// Works out the console of a file from its first bytes (and, where the format has no signature, its
+// extension). Returns { system }, { error } with a message for the player, or null when it is not one of these.
+function detectConsole(head, ext, size) {
+  const damaged = (what) => ({ error: `El archivo tiene extensión de ${what} pero su contenido no lo es. Está dañado o incompleto.` });
+  if (startsWith(head, [0x4e, 0x45, 0x53, 0x1a])) return { system: 'NES' };
+  if (ext === 'nes') return damaged('NES');
+  const n64 = startsWith(head, [0x80, 0x37, 0x12, 0x40]) || startsWith(head, [0x37, 0x80, 0x40, 0x12]) || startsWith(head, [0x40, 0x12, 0x37, 0x80]);
+  if (n64) return { system: 'N64' };
+  if (['z64', 'n64', 'v64'].includes(ext)) return damaged('Nintendo 64');
+  if (ext === 'nds') return head.length > 0x160 && head[0x15c] === 0x56 && head[0x15d] === 0xcf ? { system: 'NDS' } : damaged('Nintendo DS');
+  if (head.length > 0x104 && ascii(head, 0x100, 4) === 'SEGA') return { system: 'MD' };
+  if (ext === 'smd') return { system: 'MD' };
+  if (['md', 'gen'].includes(ext)) return damaged('Mega Drive');
+  if (['sfc', 'smc'].includes(ext)) return size >= 0x8000 ? { system: 'SNES' } : damaged('Super Nintendo');
+  if (startsWith(head, [0x50, 0x53, 0x2d, 0x58, 0x20, 0x45, 0x58, 0x45])) return { system: 'PS1' }; // PS-X EXE homebrew
+  if (startsWith(head, [0x43, 0x49, 0x53, 0x4f]) || startsWith(head, [0x00, 0x50, 0x42, 0x50])) return { system: 'PSP' };
+  const PS2 = { error: 'Es un juego de PS2. Ranura todavía no tiene un motor de PS2 que funcione en el iPhone.' };
+  if (head.length > 0x8030 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], 0x8001)) {
+    const sysId = ascii(head, 0x8008, 32);
+    if (/PSP/i.test(sysId)) return { system: 'PSP' };
+    if (/PLAYSTATION/i.test(sysId)) return size > 750 * 1024 * 1024 ? PS2 : { system: 'PS1' };
+    return { error: OTHER_SYSTEMS.disc };
+  }
+  if (head.length > 0x9340 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], 0x9319)) {
+    return /PLAYSTATION/i.test(ascii(head, 0x9320, 32)) ? { system: 'PS1' } : { error: OTHER_SYSTEMS.disc };
+  }
+  if (startsWith(head, [0x4d, 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x48, 0x44])) return size > 900 * 1024 * 1024 ? PS2 : { system: 'PS1' }; // CHD
+  if (ext === 'cue') return { error: 'El .cue solo describe el disco. Elige el archivo grande (.bin o .chd) del mismo juego.' };
+  if (['iso', 'cso', 'pbp', 'chd'].includes(ext)) return damaged('disco');
   return null;
 }
-async function addPspFile(file) {
-  const ext = (file.name.includes('.') ? file.name.split('.').pop() : '').toLowerCase();
-  const head = new Uint8Array(await file.slice(0, 0x9000).arrayBuffer());
-  const kind = pspKind(head, ext);
-  if (kind === 'OTHER') { showMsg(OTHER_SYSTEMS.disc, 'error'); return; }
-  if (!kind) { showMsg('Ese archivo tiene extensión de PSP pero su contenido no es una imagen de PSP. Está dañado o incompleto.', 'error'); return; }
-  if (IN_CLAUDE) { showMsg(OTHER_SYSTEMS.psp, 'warn'); return; }
-  showMsg(`Guardando ${file.name}… puede tardar si el archivo es grande.`);
+async function addConsoleFile(file, system, fname) {
+  const info = CONSOLES[system];
+  if (IN_CLAUDE) { showMsg(`Es un juego de ${info.note.replace(' experimental', '')}. Esa consola funciona en la app instalada (emiovskky.github.io/ranura-portatil), no dentro de Claude.`, 'warn'); return; }
+  showMsg(`Guardando ${fname}…${file.size > 200 * 1024 * 1024 ? ' puede tardar: el archivo es grande.' : ''}`);
   const sample = new Uint8Array(await file.slice(0, 4 * 1024 * 1024).arrayBuffer());
-  const id = 'p' + (await gameId(sample)).slice(0, 20) + file.size.toString(16);
+  const id = 'c' + (await gameId(sample)).slice(0, 20) + file.size.toString(16);
   const prev = await idb.get('meta', id).catch(() => null);
-  const meta = { id, name: displayName(file.name), file: file.name, system: 'PSP', title: '', code: kind, size: file.size, addedAt: prev?.addedAt || Date.now(), lastPlayed: prev?.lastPlayed || 0 };
+  const ext = (fname.includes('.') ? fname.split('.').pop() : '').toUpperCase();
+  const meta = { id, name: displayName(fname), file: fname, system, title: '', code: ext, size: file.size, addedAt: prev?.addedAt || Date.now(), lastPlayed: prev?.lastPlayed || 0 };
   try {
-    await idb.put('roms', id, file); // the Blob itself: the browser keeps it on disk, not in memory
+    await idb.put('roms', id, file.slice(0, file.size, 'application/octet-stream')); // a Blob: the browser keeps it on disk
     await idb.put('meta', id, meta);
   } catch {
-    showMsg('No hay espacio en este dispositivo para guardar ese juego de PSP. Puedes abrirlo sin guardarlo desde «PSP experimental».', 'error');
+    showMsg('No hay espacio en este dispositivo para guardar ese juego.', 'error');
     return;
   }
-  showMsg(prev ? `${meta.name} ya estaba en el estante.` : `Listo: ${meta.name}. PSP es experimental: tócalo para probarlo.`, 'ok');
+  try { await navigator.storage?.persist?.(); } catch {}
+  showMsg(prev ? `${meta.name} ya estaba en el estante.` : `Listo: ${meta.name} (${info.note}). Tócalo para jugar.`, 'ok');
   await renderShelf();
 }
-async function openPsp(meta) {
+async function openConsole(meta) {
   meta.lastPlayed = Date.now();
   try { await idb.put('meta', meta.id, meta); } catch {}
-  location.href = 'psp.html#' + meta.id;
+  location.href = 'consola.html#' + meta.id;
 }
 async function swapBackup(id) {
   const cur = await idb.get('saves', id);
@@ -2149,7 +2208,7 @@ async function play(id, cartEl) {
     await new Promise((r) => setTimeout(r, 280));
     cartEl.classList.remove('inserting');
   }
-  if (meta.system === 'PSP') { busy = false; openPsp(meta); return; }
+  if (CONSOLES[meta.system]) { busy = false; openConsole(meta); return; }
   sfx('insert');
   current = { id, meta, hash: null };
   $('player').dataset.sys = meta.system === 'GBC' ? 'gbc' : meta.system === 'GB' ? 'gb' : 'gba';
@@ -2762,7 +2821,7 @@ if (!IN_CLAUDE && 'serviceWorker' in navigator && (location.protocol === 'https:
 }
 if (!IN_CLAUDE) {
   try { navigator.storage?.persist?.(); } catch {}
-  $('slotHint').textContent = 'Elige un juego .gba, .gbc, .gb o .zip desde Archivos (PSP: .iso o .cso, experimental)';
+  $('slotHint').textContent = 'Elige un juego desde Archivos: GB, GBC, GBA, NES, SNES, Mega Drive, N64, DS, PS1 o PSP';
 }
 $('pspLink').hidden = IN_CLAUDE;
 
@@ -2946,6 +3005,7 @@ const TIPS = [
   'Los controles son multitáctiles: mantén una dirección y presiona A.',
   'En Menú → Trucos puedes meter códigos GameShark o Action Replay.',
   'Gira el iPhone y la pantalla del juego crece.',
+  'También corro NES, SNES, Mega Drive, N64, DS, PS1 y PSP: inserta el juego y lo reconozco solo.',
   'Antes de probar trucos, respalda tus partidas.',
   'Toca ⋯ en un cartucho para ponerle tu propia portada.',
 ];

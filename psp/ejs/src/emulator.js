@@ -1,3 +1,4 @@
+// Modified for Ranura Portátil (2026-11-24): the game image is handed to the file system without extra copies. See LICENSES/NOTICE.md.
 class EmulatorJS {
     getCores() {
         let rv = {
@@ -802,7 +803,7 @@ class EmulatorJS {
                 }
 
                 let fileNames = [];
-                this.checkCompression(new Uint8Array(data), this.localization("Decompress Game Data"), (fileName, fileData) => {
+                this.checkCompression((data instanceof Uint8Array ? data : new Uint8Array(data)), this.localization("Decompress Game Data"), (fileName, fileData) => { /* Ranura: no extra copy */
                     if (fileName.includes("/")) {
                         const paths = fileName.split("/");
                         let cp = "";
@@ -819,7 +820,7 @@ class EmulatorJS {
                         return;
                     }
                     if (fileName === "!!notCompressedData") {
-                        this.gameManager.FS.writeFile(altName, fileData);
+                        this.gameManager.FS.writeFile(altName, fileData, { canOwn: true }); /* Ranura: the file system keeps this buffer instead of copying it */
                         fileNames.push(altName);
                     } else {
                         this.gameManager.FS.writeFile(`/${fileName}`, fileData);

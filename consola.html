@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ranura · Consola</title>
+<meta name="theme-color" content="#170f2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<style>
+/* Layout: one loading card in Ranura's arcade style, then the emulator takes the whole screen. */
+:root {
+  --night: #170f2e; --panel: #1d1444; --line: #0b0616; --lilac: #b89cff; --pink: #ff5fb0; --lime: #c8ff4d;
+  --ink: #fbf8ff; --ink-2: #d2c5f5;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: linear-gradient(rgba(184,156,255,.065) 2px, transparent 2px) 0 0 / 28px 28px, linear-gradient(90deg, rgba(184,156,255,.065) 2px, transparent 2px) 0 0 / 28px 28px, var(--night);
+  color: var(--ink); font: 16px/1.45 var(--font); -webkit-text-size-adjust: 100%;
+}
+main { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; padding: 24px max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-right, 0px)); }
+.card { width: min(520px, 100%); display: grid; gap: 12px; padding: 26px 22px 22px; background: var(--panel); border: 3px solid var(--line); border-radius: 8px; box-shadow: inset 0 0 0 3px var(--lilac), inset 0 0 0 6px var(--panel), 5px 5px 0 var(--line); position: relative; }
+.tag { position: absolute; top: -13px; left: 14px; font: 700 11px var(--mono); letter-spacing: .08em; background: var(--pink); color: var(--line); border: 3px solid var(--line); padding: 4px 8px; transform: rotate(-2deg); }
+h1 { margin: 0; font: 700 22px/1.2 var(--mono); overflow-wrap: anywhere; }
+p { margin: 0; color: var(--ink-2); }
+#msg[data-tone="error"] { color: #ffb0d6; }
+.bar { height: 10px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 34%; background: var(--lime); animation: load 1.1s steps(7, jump-none) infinite; }
+@keyframes load { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.back { justify-self: start; color: var(--lime); font-weight: 700; text-decoration: none; border: 2px solid var(--line); background: #33246a; padding: 8px 12px; border-radius: 4px; box-shadow: 2px 2px 0 var(--line); }
+#stage { position: fixed; inset: 0; z-index: 10; background: #000; }
+#game { width: 100%; height: 100%; }
+/* top centre: the emulator's own touch controls use the corners */
+#closeGame { position: fixed; z-index: 20; top: max(4px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); border: 2px solid var(--line); border-radius: 4px; padding: 4px 10px; background: rgba(29, 20, 68, .82); color: var(--ink-2); font: 700 13px var(--mono); }
+@media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; } }
+</style>
+</head>
+<body>
+<main id="home">
+  <div class="card">
+    <span class="tag" id="sysTag">CONSOLA</span>
+    <h1 id="gameName">Cargando…</h1>
+    <div class="bar" id="bar"><i></i></div>
+    <p id="msg" role="status" aria-live="polite">Buscando el juego en tu estante…</p>
+    <a class="back" href="./">← Volver al estante</a>
+  </div>
+</main>
+<div id="stage" hidden><div id="game"></div></div>
+<button id="closeGame" type="button" hidden>← Salir</button>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const fail = (text) => { $('msg').textContent = text; $('msg').dataset.tone = 'error'; $('bar').hidden = true; };
+  // EmulatorJS system for each of Ranura's consoles. Only PSP needs threads (and so an isolated page).
+  const SYSTEMS = {
+    NES: { core: 'nes', label: 'NES', color: '#e0483e' },
+    SNES: { core: 'snes', label: 'SNES', color: '#8f6fe8' },
+    MD: { core: 'segaMD', label: 'MEGA DRIVE', color: '#3b6cf5' },
+    N64: { core: 'n64', label: 'N64', color: '#2fae5b' },
+    NDS: { core: 'nds', label: 'DS', color: '#9aa0b5' },
+    PS1: { core: 'psx', label: 'PS1', color: '#8f93a8' },
+    PSP: { core: 'psp', label: 'PSP', color: '#8f6fe8', threads: true },
+  };
+  $('closeGame').addEventListener('click', () => { location.href = './'; });
+
+  const id = /^[a-z0-9]+$/i.test(location.hash.slice(1)) ? location.hash.slice(1) : '';
+  if (!id) { fail('No se indicó ningún juego. Ábrelo desde tu estante.'); return; }
+  let meta = null;
+  let blob = null;
+  try {
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('ranura'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    if (db.objectStoreNames.contains('roms') && db.objectStoreNames.contains('meta')) {
+      const get = (store) => new Promise((res, rej) => { const g = db.transaction(store).objectStore(store).get(id); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+      meta = await get('meta');
+      blob = await get('roms');
+    }
+  } catch {}
+  if (!meta || !(blob instanceof Blob)) { fail('Ese juego ya no está en el estante. Vuelve e insértalo de nuevo.'); return; }
+  const sys = SYSTEMS[meta.system];
+  if (!sys) { fail('Ranura no tiene un motor para esa consola.'); return; }
+  $('sysTag').textContent = sys.label;
+  $('gameName').textContent = meta.name;
+  document.title = `${meta.name} · Ranura`;
+
+  if (sys.threads && !window.crossOriginIsolated) {
+    // Threads need SharedArrayBuffer, which browsers only give to isolated pages. Ranura's service
+    // worker adds the isolation headers to this page; the first visit reloads once so it takes control.
+    let tried = false;
+    try { tried = sessionStorage.getItem('ranura-coi') === '1'; } catch {}
+    if (!tried && 'serviceWorker' in navigator && isSecureContext) {
+      try { sessionStorage.setItem('ranura-coi', '1'); } catch {}
+      $('msg').textContent = 'Preparando el motor…';
+      try { await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready; location.reload(); return; } catch {}
+    }
+    fail('Este navegador no permite los hilos que necesita el motor de PSP. Usa PPSSPP de la App Store.');
+    return;
+  }
+  try { sessionStorage.removeItem('ranura-coi'); } catch {}
+  let webgl2 = false;
+  try { webgl2 = !!document.createElement('canvas').getContext('webgl2'); } catch {}
+  if (!webgl2 && ['PSP', 'N64', 'NDS', 'PS1'].includes(meta.system)) { fail('Este navegador no tiene WebGL 2, que ese motor necesita.'); return; }
+
+  const gb = blob.size / 1024 ** 3;
+  $('msg').textContent = gb > 0.7
+    ? `Cargando ${gb.toFixed(1)} GB en memoria. Puede tardar; si el iPhone se queda sin memoria, la página se recargará.`
+    : 'Encendiendo…';
+
+  // The file keeps its real extension (the engine picks the format from it) and gets the game's id in its
+  // name, so saves made by two different games can never land in the same file.
+  const original = meta.file || meta.name;
+  const dot = original.lastIndexOf('.');
+  const clean = (s) => s.replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
+  const fileName = `${clean(dot > 0 ? original.slice(0, dot) : original)} [${id.slice(0, 8)}]${dot > 0 ? original.slice(dot) : ''}`;
+  window.EJS_player = '#game';
+  window.EJS_core = sys.core;
+  window.EJS_threads = !!sys.threads;
+  window.EJS_DEBUG_XX = true; // load EmulatorJS from its bundled source files
+  window.EJS_pathtodata = 'psp/ejs/';
+  window.EJS_gameUrl = new File([blob], fileName); // read straight from the shelf; nothing is uploaded
+  window.EJS_gameName = clean(meta.name);
+  window.EJS_startOnLoaded = true;
+  window.EJS_color = sys.color;
+  window.EJS_language = 'es-ES';
+  window.EJS_defaultOptions = Object.assign({ 'save-state-location': 'browser' }, meta.system === 'PSP' ? {
+    // favour speed on a phone: native resolution, light texture work, skip frames only when needed
+    ppsspp_internal_resolution: '480x272', ppsspp_auto_frameskip: 'enabled', ppsspp_frameskip: '1',
+    ppsspp_lazy_texture_caching: 'enabled', ppsspp_spline_quality: 'Low',
+  } : {});
+  $('home').hidden = true;
+  $('stage').hidden = false;
+  $('closeGame').hidden = false;
+  const s = document.createElement('script');
+  s.src = 'psp/ejs/loader.js';
+  document.body.append(s);
+})();
+</script>
+</body>
+</html>
