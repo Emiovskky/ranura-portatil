@@ -456,7 +456,7 @@ export async function load(config) {
     const pollGamepads = () => {
         if (!opts.gamepads || !navigator.getGamepads)
             return;
-        const pad = navigator.getGamepads()[0];
+        const pad = Array.from(navigator.getGamepads()).find((p) => p && p.connected); // Ranura: the first connected controller, whatever its slot
         let mask = 0;
         if (pad && pad.connected) {
             const btn = (i) => !!pad.buttons[i]?.pressed;

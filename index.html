@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Ranura Portátil</title>
 <meta name="description" content="Emulador de GB, GBC y GBA con controles táctiles para iPhone.">
 <meta name="theme-color" content="#170f2e">
@@ -3063,6 +3063,24 @@ const boot = (data) => {
 window.claude?.hot?.snapshot?.(() => { pollSave(); return { playing: current?.id || null }; });
 if (window.claude?.hot?.ready) window.claude.hot.ready(boot); else boot(window.claude?.hot?.data ?? {});
 setInterval(() => { if ($('player').hidden) renderShelf(); }, 60000);
+</script>
+<script>
+// No page zoom. A double tap or a pinch while playing must never zoom the page: with the pad taking every
+// touch there would be no way to zoom back out. If the page still ends up zoomed, it is reset.
+(() => {
+  document.documentElement.style.touchAction = 'manipulation'; // turns off double-tap zoom
+  const meta = document.querySelector('meta[name="viewport"]');
+  const locked = 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover';
+  if (meta) meta.content = locked;
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false }); // pinch (Safari)
+  document.addEventListener('dblclick', (e) => { if (!e.target.closest('input, textarea, select')) e.preventDefault(); }, { passive: false });
+  const vv = window.visualViewport;
+  if (vv && meta) vv.addEventListener('resize', () => {
+    if (vv.scale <= 1.01) return;
+    meta.content = locked + ',minimum-scale=1'; // writing the tag again makes the browser go back to scale 1
+    requestAnimationFrame(() => { meta.content = locked; });
+  });
+})();
 </script>
 
 </body>
