@@ -436,8 +436,12 @@ export async function load(config) {
         pushInput();
         return true;
     };
+    const typing = (e) => { // typing in a form
+        const t = e.target;
+        return paused || !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable));
+    };
     const onKeyDown = (e) => {
-        if (e.repeat)
+        if (e.repeat || typing(e))
             return;
         if (applyKey(e.code, true))
             e.preventDefault();
@@ -487,7 +491,7 @@ export async function load(config) {
     // next interaction if the context comes up suspended.
     const resumeAudio = () => {
         if (audioCtx.state === 'suspended')
-            void audioCtx.resume();
+            audioCtx.resume().catch(() => {});
     };
     window.addEventListener('pointerdown', resumeAudio);
     window.addEventListener('pointerup', resumeAudio);
@@ -790,6 +794,32 @@ export async function load(config) {
         get isPaused() {
             return paused;
         },
+        get cheatsSupported() {
+            return typeof mod._mgbawasm_cheat_add === 'function';
+        },
+        // Replaces every cheat in the core. Each item: { name, code (one code per line), type, enabled }.
+        // Returns, per item, how many lines mGBA's parser accepted and rejected.
+        setCheats(list) {
+            if (typeof mod._mgbawasm_cheat_add !== 'function') return null;
+            mod._mgbawasm_cheats_clear();
+            return (list || []).map((cheat) => {
+                const namePtr = heapString(String(cheat.name || ''));
+                const codePtr = heapString(String(cheat.code || ''));
+                const res = mod._mgbawasm_cheat_add(namePtr, codePtr, cheat.type | 0, cheat.enabled ? 1 : 0);
+                mod._free(namePtr);
+                mod._free(codePtr);
+                return res < 0 ? { accepted: 0, rejected: 0, failed: true } : { accepted: res & 0xffff, rejected: res >>> 16 };
+            });
+        },
+        read8(address) {
+            return typeof mod._mgbawasm_read8 === 'function' ? mod._mgbawasm_read8(address >>> 0) : -1;
+        },
+        // Runs frames as fast as possible without drawing or sound (used to measure the engine).
+        benchmark(frames) {
+            const t0 = performance.now();
+            for (let i = 0; i < frames; i++) { mod._mgbawasm_run_frame(); mod._mgbawasm_read_audio(audioPtr, AUDIO_SCRATCH_FRAMES); }
+            return (performance.now() - t0) / frames;
+        },
         debugInfo() {
             return { audio: audioCtx.state, sampleRate: audioCtx.sampleRate, coreRate, framerate, enqueuedFrames, consumedFrames, speed, audioOk, audioStalled };
         },
@@ -816,14 +846,14 @@ export async function load(config) {
             paused = true;
             cancelAnimationFrame(rafId);
             rafId = 0;
-            void audioCtx.suspend();
+            audioCtx.suspend().catch(() => {});
             void persistSram();
         },
         resume() {
             if (!running || !paused)
                 return;
             paused = false;
-            void audioCtx.resume();
+            audioCtx.resume().catch(() => {});
             startLoop();
         },
         reset() {
@@ -915,7 +945,7 @@ export async function load(config) {
             window.removeEventListener('keydown', resumeAudio);
             sink?.disconnect();
             gain.disconnect();
-            void audioCtx.close();
+            audioCtx.close().catch(() => {});
             mod._free(audioPtr);
             mod._mgbawasm_unload();
             emit({ type: 'exit' });

@@ -3,7 +3,10 @@
 ## mGBA (motor de emulación)
 - Proyecto: https://github.com/mgba-emu/mgba — Copyright © Jeffrey Pfau y colaboradores.
 - Licencia: Mozilla Public License 2.0 (MPL-2.0), texto completo en `MPL-2.0.txt`.
-- `core/mgba.wasm` es mGBA compilado a WebAssembly.
+- `core/mgba.wasm` y `core/mgba.js` son mGBA (revisión c034660f007c543233f1cadeb0ca13c71afd8f41) compilado a
+  WebAssembly por Ranura con Emscripten. La capa de enlace (`mgba_shim.c`, de wasm-gaming, MPL-2.0) está
+  **modificada**: añade trucos (el motor de trucos del propio mGBA) y lectura/escritura de memoria. El archivo
+  modificado y la receta de compilación están en `LICENSES/source/`.
 
 ## @wasm-gaming/mgba-wasm 0.1.1 (compilación web de mGBA)
 - Proyecto: https://github.com/wasm-gaming/mGBA-wasm — Licencia MPL-2.0.
