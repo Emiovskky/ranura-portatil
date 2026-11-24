@@ -23,3 +23,7 @@ App Store. Avisos y enlaces al código fuente en [`LICENSES/NOTICE.md`](LICENSES
 ## Más consolas
 `consola.html` abre con EmulatorJS los juegos de NES, SNES, Mega Drive, N64, DS, PS1 y PSP que guardes en el
 estante. Las de 3D son experimentales. Licencias de cada núcleo en [`LICENSES/NOTICE.md`](LICENSES/NOTICE.md).
+
+## PS2 muy experimental
+`ps2.html` usa la compilación web oficial de Play! (BSD 2-Clause). Arranca discos homebrew; con juegos comerciales
+va lento, no guarda partidas y no tiene pausa. Licencia en [`LICENSES/Play-BSD-2-Clause.txt`](LICENSES/Play-BSD-2-Clause.txt).

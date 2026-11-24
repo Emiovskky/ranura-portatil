@@ -25,6 +25,11 @@
 - `index.html`, `sw.js` y los cartuchos de prueba incluidos (homebrew escrito para Ranura) no contienen
   código ni recursos de juegos comerciales. Ranura no incluye juegos.
 
+## PS2 muy experimental (`ps2.html`, carpeta `ps2/`)
+- **Play!** — https://github.com/jpd002/Play- — licencia BSD 2-Clause (texto en `Play-BSD-2-Clause.txt`).
+  `ps2/Play.js` y `ps2/Play.wasm` son la compilación web oficial, sin modificar, descargada de https://playjs.purei.org
+  (versión 0.77-17-g1f272327). Incluye bibliotecas de terceros con sus propias licencias (libchdr, zlib, zstd, entre otras).
+
 ## Otras consolas y PSP (`consola.html`, `psp.html`, carpeta `psp/ejs/`)
 - Núcleos de `@emulatorjs/core-*@4.2.3` sin modificar: fceumm (NES, GPL-2.0), snes9x (SNES, licencia Snes9x:
   uso no comercial), genesis_plus_gx (Mega Drive, licencia propia: uso no comercial), mupen64plus_next (N64, GPL-2.0),

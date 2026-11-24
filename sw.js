@@ -1,11 +1,11 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = 'd17bcc62676f';
+const VERSION = 'c9d98fb4dbed';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
 const PSP_CACHE = 'ranura-psp-4.2.3';
-const ASSETS = ["./","index.html","psp.html","consola.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
+const ASSETS = ["./","index.html","psp.html","consola.html","ps2.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
 
 // psp.html needs SharedArrayBuffer, which browsers only allow on cross-origin isolated pages.
 // Static hosts cannot send those headers, so the worker adds them to that page.
@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.origin === self.location.origin) {
-    if (req.mode === 'navigate' && /\/(psp|consola)\.html$/.test(url.pathname)) {
+    if (req.mode === 'navigate' && /\/(psp|consola|ps2)\.html$/.test(url.pathname)) {
       const page = url.pathname.split('/').pop();
       event.respondWith(
         Promise.race([fetch(req), timeout(4000)])
@@ -48,6 +48,15 @@ self.addEventListener('fetch', (event) => {
           .catch(() => caches.match(page, { ignoreSearch: true }))
           .then(isolate),
       );
+      return;
+    }
+    if (url.pathname.includes('/ps2/')) {
+      // The PS2 engine starts its threads from Play.js itself, so its files must carry the isolation headers too.
+      event.respondWith(caches.open(PSP_CACHE).then(async (c) => {
+        let res = await c.match(req, { ignoreSearch: true });
+        if (!res) { res = await fetch(req); if (res.ok) c.put(req, res.clone()); }
+        return isolate(res);
+      }));
       return;
     }
     if (url.pathname.includes('/psp/ejs/')) {
