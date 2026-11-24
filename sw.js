@@ -1,6 +1,6 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = '60a254f9cf39';
+const VERSION = 'e42fa809474b';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
@@ -44,7 +44,8 @@ async function discPiece(url) {
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // 'reload': take the files from the server, not from the browser's own HTTP cache (which may be minutes old)
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -75,7 +76,7 @@ self.addEventListener('fetch', (event) => {
     if (req.mode === 'navigate' && /\/(psp|consola|ps2)\.html$/.test(url.pathname)) {
       const page = url.pathname.split('/').pop();
       event.respondWith(
-        Promise.race([fetch(req), timeout(4000)])
+        Promise.race([fetch(req.url, { cache: 'no-cache' }), timeout(4000)])
           .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(page, copy)); return res; })
           .catch(() => caches.match(page, { ignoreSearch: true }))
           .then(isolate),
@@ -104,7 +105,7 @@ self.addEventListener('fetch', (event) => {
     if (req.mode === 'navigate') {
       // Fresh page when online (so updates arrive), cached page when offline or slow.
       event.respondWith(
-        Promise.race([fetch(req), timeout(4000)])
+        Promise.race([fetch(req.url, { cache: 'no-cache' }), timeout(4000)])
           .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put('index.html', copy)); return res; })
           .catch(() => caches.match('index.html', { ignoreSearch: true })),
       );
