@@ -39,6 +39,10 @@
 - `psp/ejs/src/emulator.js` está **modificado por Ranura**: entrega la imagen del juego al sistema de archivos sin
   copiarla de más (menos memoria con discos grandes). El archivo publicado es el propio código fuente.
   Los juegos grandes no pasan por ahí: `consola.html` los monta en el sistema de archivos del motor y los lee por partes.
+- **EmulatorJS 4.3.0-pre** (versión preliminar, solo para PSP, carpeta `psp/ejs43/`) — publicación `v4.3.0-pre` de
+  https://github.com/EmulatorJS/EmulatorJS — GPL-3.0. Archivos sin modificar: `loader.js`, `emulator.min.js`,
+  `emulator.min.css`, `compression/`, `localization/` y el núcleo PPSSPP (`cores/ppsspp-*`, GPL-2.0 o posterior,
+  fuente en https://github.com/EmulatorJS/ppsspp). El núcleo de 4.2.3 queda como configuración alternativa.
 - **EmulatorJS 4.2.3** — https://github.com/EmulatorJS/EmulatorJS — licencia GPL-3.0 (texto en `GPL-3.0.txt`).
   Archivos de `@emulatorjs/emulatorjs@4.2.3` sin modificar (`loader.js`, `src/`, `compression/`, `localization/`).
 - **PPSSPP** (núcleo `ppsspp` de EmulatorJS, `@emulatorjs/core-ppsspp@4.2.3`) — https://github.com/hrydgard/ppsspp —

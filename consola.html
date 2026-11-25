@@ -154,7 +154,31 @@ p { margin: 0; color: var(--ink-2); }
 <script>
 (async () => {
   const $ = (id) => document.getElementById(id);
-  const BUILD = '1125-0019';
+  const BUILD = '1125-1715';
+  // Performance meter. The engine advances the game from requestAnimationFrame: timing those calls tells how
+  // long each turn takes and how much of the time the page is busy. The sound it hands to the browser tells its
+  // real speed: one second of sound per second means the game runs at full speed.
+  const perf = { turns: 0, busy: 0, max: 0, sound: 0, since: performance.now(), last: null };
+  const realFrame = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (callback) => realFrame((time) => {
+    const began = performance.now();
+    try { return callback(time); } finally {
+      const took = performance.now() - began;
+      if (took > 0.25) { perf.turns++; perf.busy += took; if (took > perf.max) perf.max = took; }
+    }
+  });
+  try {
+    const startSource = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) { try { if (this.buffer) perf.sound += this.buffer.duration; } catch {} return startSource.apply(this, args); };
+  } catch {}
+  const perfSample = () => {
+    const now = performance.now(), seconds = (now - perf.since) / 1000;
+    if (seconds < 0.5) return perf.last;
+    perf.last = { turns: Math.round(perf.turns / seconds), ms: perf.turns ? Math.round(perf.busy / perf.turns * 10) / 10 : 0, max: Math.round(perf.max), busy: Math.round(perf.busy / (seconds * 10)), speed: Math.round(perf.sound / seconds * 100) };
+    perf.turns = 0; perf.busy = 0; perf.max = 0; perf.sound = 0; perf.since = now;
+    return perf.last;
+  };
+  window.__perf = () => perf.last;
   // A game opened from the shelf starts without a tap on this page, so the browser creates the engine's
   // audio suspended. Any tap, on the pad or anywhere, wakes it (touchend/click count as a user gesture).
   const audioContexts = [];
@@ -401,6 +425,8 @@ p { margin: 0; color: var(--ink-2); }
       // EmulatorJS would cover the game with a "click to resume" popup while the sound is asleep. The sound
       // wakes on the first touch anyway (see wakeAudio), so the popup is not shown.
       try { v.checkStarted = () => {}; } catch {}
+      // The minified EmulatorJS only passes the engine's messages on when its debug flag is set.
+      if (detailedLog) { try { v.debug = true; } catch {} }
       try {
         v.on('saveDatabaseLoaded', (FS) => {
           let mem = 0;
@@ -414,7 +440,7 @@ p { margin: 0; color: var(--ink-2); }
               step('arrancando el juego');
               // "-v" makes the engine report everything it does to the console. That is for finding out why a
               // game failed; while playing it is only work, so it is kept for the run after a failure.
-              const list = Array.isArray(args) && !detailedLog ? args.filter((a) => a !== '-v') : args;
+              const list = !Array.isArray(args) ? args : !detailedLog ? args.filter((a) => a !== '-v') : args.includes('-v') ? args : ['-v', ...args];
               return main.call(this, list);
             };
           } catch {}
@@ -523,6 +549,7 @@ p { margin: 0; color: var(--ink-2); }
     { name: 'intérprete', opts: { ppsspp_cpu_core: 'Interpreter' } },
     { name: 'gráficos simples', opts: { ppsspp_skip_buffer_effects: 'enabled', ppsspp_gpu_hardware_transform: 'disabled' } },
     { name: 'dibujo por software', opts: { ppsspp_software_rendering: 'enabled' } },
+    { name: 'motor anterior', opts: {}, old: true },
   ];
   // (the keys carry a 2: the list changed order, and a number saved for the old list would point elsewhere)
   const configKey = 'ranura:config2:' + id, triesKey = 'ranura:intentos2:' + id;
@@ -537,7 +564,11 @@ p { margin: 0; color: var(--ink-2); }
     ppsspp_lazy_texture_caching: 'enabled', ppsspp_spline_quality: 'Low', ppsspp_texture_anisotropic_filtering: 'disabled',
     ppsspp_skip_gpu_readbacks: 'enabled', ppsspp_lower_resolution_for_effects: 'Balanced', ppsspp_texture_scaling_level: 'disabled',
   }, PSP_CONFIGS[config].opts) : {};
-  if (meta.system === 'PSP') { run.info.config = `${config + 1}/${PSP_CONFIGS.length} ${PSP_CONFIGS[config].name}`; saveRun(); }
+  // PSP runs on the newer EmulatorJS (4.3.0-pre): its PPSSPP gets a hardware graphics context. In 4.2.3 that
+  // request fails ("SET_HW_RENDER - Dynamic request HW context failed") and every frame is drawn by software,
+  // which is what made heavy games crawl. The older one stays as the last configuration.
+  const newEngine = meta.system === 'PSP' && !PSP_CONFIGS[config].old && query.get('motor') !== 'anterior';
+  if (meta.system === 'PSP') { run.info.config = `${config + 1}/${PSP_CONFIGS.length} ${PSP_CONFIGS[config].name}`; run.info.ejs = newEngine ? '4.3.0-pre' : '4.2.3'; saveRun(); }
   // EmulatorJS remembers each game's settings and prefers them over the defaults: put these on top of them.
   try {
     const ejsKey = `ejs-1-${sys.core}-${clean(meta.name)}-settings`;
@@ -566,17 +597,32 @@ p { margin: 0; color: var(--ink-2); }
   // has to interpret the game's code is that potato: with 30 the game does half the work each second and plays
   // at its real speed instead of in slow motion. The list is rewritten as EmulatorJS unpacks it.
   const slowDeviceCompat = (text) => {
-    let section = '', moved = 0;
-    const lines = text.split('\n').map((line) => {
+    const lines = text.split('\n');
+    const idOf = (t) => (/^#?\s*([A-Z]{4}\d{5})\s*=\s*true\s*$/i.exec(t) || [])[1];
+    const is30 = (name) => name === 'GoWFramerateHack30' || name === 'FramerateHack30'; // older / newer engine
+    const sections = [], on60 = new Set(), off30 = new Set();
+    let section = '';
+    for (const line of lines) {
       const t = line.trim();
       const head = /^\[(.+)\]$/.exec(t);
-      if (head) { section = head[1]; return line; }
-      if (section === 'GoWFramerateHack60' && /^[A-Z]{4}\d{5}\s*=\s*true/.test(t)) return '# ' + t;
-      if (section === 'GoWFramerateHack30') { const off = /^#\s*([A-Z]{4}\d{5}\s*=\s*true)\s*$/.exec(t); if (off) { moved++; return off[1]; } }
+      if (head) section = head[1];
+      sections.push(section);
+      const game = idOf(t);
+      if (!game) continue;
+      if (section === 'GoWFramerateHack60' && !t.startsWith('#')) on60.add(game);
+      if (is30(section) && t.startsWith('#')) off30.add(game);
+    }
+    let moved = 0;
+    const out = lines.map((line, n) => {
+      const t = line.trim(), game = idOf(t);
+      if (!game) return line;
+      // a game only leaves the 60 list if the 30 list has it, so none is left without its fix
+      if (sections[n] === 'GoWFramerateHack60' && !t.startsWith('#') && off30.has(game)) return '# ' + t;
+      if (is30(sections[n]) && t.startsWith('#') && on60.has(game)) { moved++; return t.replace(/^#\s*/, ''); }
       return line;
     });
     lazyStats.gow30 = moved;
-    return lines.join('\n');
+    return out.join('\n');
   };
   if (meta.system === 'PSP' && query.get('gow60') !== '1') onEngineReady.push((FS) => {
     const write = FS.writeFile;
@@ -776,10 +822,11 @@ p { margin: 0; color: var(--ink-2); }
     try { const cv = document.querySelector('#game canvas'); gl = cv ? `lienzo ${cv.width}x${cv.height}` : 'sin lienzo'; } catch {}
     $('info').textContent = [
       `v${BUILD} · ${meta.system} · ${Math.round(blob.size / 1048576)} MB`,
-      `motor: ${(run && run.info.core) || engine}${run && run.info.mem ? ` · memoria ${run.info.mem} MB` : ''}${run && run.info.config ? ` · config ${run.info.config}` : ''}`,
+      `motor: ${(run && run.info.core) || engine}${run && run.info.mem ? ` · memoria ${run.info.mem} MB` : ''}${run && run.info.config ? ` · config ${run.info.config}` : ''}${run && run.info.ejs ? ` · EmulatorJS ${run.info.ejs}` : ''}`,
       lazy ? `por partes (${lazyStats.via}): ${lazyStats.waited || 0} trozos con espera, ${lazyStats.ready || 0} ya listos` : 'juego cargado entero',
       meta.system === 'PSP' ? `God of War a 30 cuadros: ${lazyStats.gow30 ? 'sí' : 'no'} · registro del motor ${run ? run.info.log0 : ''}` : '',
       `cuadros: ${frame == null ? '—' : frame}${fps == null ? '' : ` (${fps} por segundo)`} · ${gl}`,
+      (() => { const p = perfSample(); return p ? `rendimiento: ${p.turns} vueltas/s · ${p.ms} ms por vuelta (máx ${p.max}) · ocupado ${p.busy} % · sonido ${p.speed} % de la velocidad real` : 'rendimiento: midiendo'; })(),
       `audio: ${audioContexts.length ? audioContexts.map((a) => a.state).join(', ') : 'sin iniciar'}`,
       `mando: ${c ? c.id.slice(0, 40) : 'ninguno'}`,
       `pasos: ${run ? run.steps.join(' › ') : ''}`,
@@ -808,6 +855,21 @@ p { margin: 0; color: var(--ink-2); }
       setTimeout(() => { if (Date.now() - armed >= 3900) eb.textContent = label; }, 4000);
     });
   }
+  if (meta.system === 'PSP') {
+    // Same idea for PSP's two engines: the new one draws with the GPU, the previous one by software.
+    const eb = $('engineBtn');
+    const previous = PSP_CONFIGS.findIndex((c) => c.old);
+    const label = `Motor: ${newEngine ? 'nuevo' : 'anterior'}`;
+    eb.textContent = label;
+    eb.hidden = false;
+    let armed = 0;
+    eb.addEventListener('click', () => {
+      if (Date.now() - armed < 4000) { try { localStorage.setItem(configKey, String(newEngine ? previous : 0)); } catch {} leaveClean(); location.reload(); return; }
+      armed = Date.now();
+      eb.textContent = `¿Cambiar al motor ${newEngine ? 'anterior' : 'nuevo'}? Toca otra vez`;
+      setTimeout(() => { if (Date.now() - armed >= 3900) eb.textContent = label; }, 4000);
+    });
+  }
   window.EJS_onGameStart = () => {
     // If the swap did not happen the engine is holding the stand-in, not the game: say so instead of a black screen.
     if (lazy && !lazyStats.mounted) { fail('No se pudo conectar el juego con el motor para leerlo por partes. Cierra y abre la app e inténtalo de nuevo.'); return; }
@@ -825,6 +887,7 @@ p { margin: 0; color: var(--ink-2); }
       if (!run || document.hidden) return;
       run.alive = Date.now();
       try { run.info.frames = window.EJS_emulator.gameManager.getFrameNum(); } catch {}
+      if ($('info').hidden) { const p = perfSample(); if (p) run.info.perf = `${p.turns}/s ${p.ms}ms máx${p.max} ocupado${p.busy}% sonido${p.speed}%`; }
       saveRun();
       if (!crashed && ++beats === 30) { try { localStorage.removeItem(logKey); } catch {} } // a minute and a half of play: it works
     }, 3000);
@@ -833,8 +896,25 @@ p { margin: 0; color: var(--ink-2); }
   $('home').hidden = true;
   $('stage').hidden = false;
   $('closeGame').hidden = false;
+  if (newEngine) {
+    // (an absolute address: this loader resolves a relative one against its own folder, not the page's)
+    window.EJS_pathtodata = new URL('psp/ejs43/', location.href).href;
+    window.EJS_DEBUG_XX = false; // its minified build; the detailed log is asked for separately when needed
+    window.EJS_language = 'es';
+    // This EmulatorJS asks for PSP's support files at a fixed address, "data/cores/..." next to the page, and
+    // looks at its own CDN for updates. Here the files live in psp/ejs43/, and nothing is fetched from outside.
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      try {
+        const address = typeof input === 'string' ? input : (input && input.url) || '';
+        if (/(^|\/)data\/cores\/ppsspp-assets\.zip(\?|$)/.test(address)) return realFetch(new URL('psp/ejs43/cores/ppsspp-assets.zip', location.href).href, init);
+        if (/^https?:\/\/cdn\.emulatorjs\.org\//.test(address)) return Promise.resolve(new Response('', { status: 404 }));
+      } catch {}
+      return realFetch(input, init);
+    };
+  }
   const s = document.createElement('script');
-  s.src = 'psp/ejs/loader.js';
+  s.src = newEngine ? 'psp/ejs43/loader.js' : 'psp/ejs/loader.js';
   document.body.append(s);
 })();
 </script>

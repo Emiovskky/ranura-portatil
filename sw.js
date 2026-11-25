@@ -1,10 +1,12 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = '6b00e2d73790';
+const VERSION = 'a43176a32e61';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
 const PSP_CACHE = 'ranura-psp-4.2.3';
+// The newer EmulatorJS used for PSP has its own cache: its files are different files with the same names.
+const EJS43_CACHE = 'ranura-ejs43-pre1';
 const ASSETS = ["./","index.html","psp.html","consola.html","ps2.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
 
 // psp.html needs SharedArrayBuffer, which browsers only allow on cross-origin isolated pages.
@@ -51,7 +53,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => (k.startsWith('ranura-app-') && k !== CACHE) || (k.startsWith('ranura-psp-') && k !== PSP_CACHE)).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => (k.startsWith('ranura-app-') && k !== CACHE) || (k.startsWith('ranura-psp-') && k !== PSP_CACHE) || (k.startsWith('ranura-ejs43-') && k !== EJS43_CACHE)).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -92,8 +94,8 @@ self.addEventListener('fetch', (event) => {
       }));
       return;
     }
-    if (url.pathname.includes('/psp/ejs/')) {
-      event.respondWith(caches.open(PSP_CACHE).then(async (c) => {
+    if (url.pathname.includes('/psp/ejs/') || url.pathname.includes('/psp/ejs43/')) {
+      event.respondWith(caches.open(url.pathname.includes('/psp/ejs43/') ? EJS43_CACHE : PSP_CACHE).then(async (c) => {
         const hit = await c.match(req, { ignoreSearch: true });
         if (hit) return hit;
         const res = await fetch(req);
