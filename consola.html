@@ -154,7 +154,7 @@ p { margin: 0; color: var(--ink-2); }
 <script>
 (async () => {
   const $ = (id) => document.getElementById(id);
-  const BUILD = '1124-2354';
+  const BUILD = '1125-0019';
   // A game opened from the shelf starts without a tap on this page, so the browser creates the engine's
   // audio suspended. Any tap, on the pad or anywhere, wakes it (touchend/click count as a user gesture).
   const audioContexts = [];
@@ -253,6 +253,11 @@ p { margin: 0; color: var(--ink-2); }
     return;
   }
   step(`${meta.system}, ${Math.round(blob.size / 1048576)} MB`);
+  const logKey = 'ranura:registro:' + id;
+  let detailedLog = false;
+  try { detailedLog = localStorage.getItem(logKey) === '1' || new URLSearchParams(location.search).get('log') === '1'; } catch {}
+  if (last && last.id === id && !last.clean) { detailedLog = true; try { localStorage.setItem(logKey, '1'); } catch {} } // it died last time
+  run.info.log0 = detailedLog ? 'detallado' : 'apagado';
   // Nintendo 64 has two engines. EmulatorJS picks one by browser (ParaLLEl on iPhone Safari, Mupen64Plus
   // elsewhere); the player's own choice for a game, made from the notice below, wins over that.
   const ENGINES = { N64: { mupen64plus_next: 'Mupen64Plus', parallel_n64: 'ParaLLEl' } };
@@ -405,7 +410,13 @@ p { margin: 0; color: var(--ink-2); }
           for (const fn of onEngineReady) fn(FS);
           try {
             const main = v.Module.callMain;
-            v.Module.callMain = function () { step('arrancando el juego'); return main.apply(this, arguments); };
+            v.Module.callMain = function (args) {
+              step('arrancando el juego');
+              // "-v" makes the engine report everything it does to the console. That is for finding out why a
+              // game failed; while playing it is only work, so it is kept for the run after a failure.
+              const list = Array.isArray(args) && !detailedLog ? args.filter((a) => a !== '-v') : args;
+              return main.call(this, list);
+            };
           } catch {}
         });
       } catch {}
@@ -550,6 +561,32 @@ p { margin: 0; color: var(--ink-2); }
       } catch (e) { step('no se pudieron escribir las opciones del motor'); }
     };
   });
+  // The PSP engine keeps a per-game list of fixes (compat.ini). For the God of War games it forces 60 frames
+  // per second; the same list carries a 30-frames variant, switched off, "to run on a potato". An engine that
+  // has to interpret the game's code is that potato: with 30 the game does half the work each second and plays
+  // at its real speed instead of in slow motion. The list is rewritten as EmulatorJS unpacks it.
+  const slowDeviceCompat = (text) => {
+    let section = '', moved = 0;
+    const lines = text.split('\n').map((line) => {
+      const t = line.trim();
+      const head = /^\[(.+)\]$/.exec(t);
+      if (head) { section = head[1]; return line; }
+      if (section === 'GoWFramerateHack60' && /^[A-Z]{4}\d{5}\s*=\s*true/.test(t)) return '# ' + t;
+      if (section === 'GoWFramerateHack30') { const off = /^#\s*([A-Z]{4}\d{5}\s*=\s*true)\s*$/.exec(t); if (off) { moved++; return off[1]; } }
+      return line;
+    });
+    lazyStats.gow30 = moved;
+    return lines.join('\n');
+  };
+  if (meta.system === 'PSP' && query.get('gow60') !== '1') onEngineReady.push((FS) => {
+    const write = FS.writeFile;
+    FS.writeFile = function (path, data, opts) {
+      if (path === '/PPSSPP/compat.ini' && data && typeof data !== 'string') {
+        try { return write.call(this, path, new TextEncoder().encode(slowDeviceCompat(new TextDecoder().decode(data))), opts); } catch {}
+      }
+      return write.apply(this, arguments);
+    };
+  });
   window.EJS_defaultOptions = Object.assign({ 'save-state-location': 'browser' }, bootOptions);
   // A WebAssembly error means the engine is gone: the picture freezes and nothing says why. Say it.
   let crashed = false;
@@ -559,6 +596,7 @@ p { margin: 0; color: var(--ink-2); }
     crashed = true;
     lazyStats.crash = text.slice(0, 200);
     step('el motor se detuvo: ' + text.slice(0, 80));
+    try { localStorage.setItem(logKey, '1'); } catch {} // next run: detailed engine log
     leaveClean(); // this stop is already explained on screen
     try {
       const i = (run && run.info) || {};
@@ -740,6 +778,7 @@ p { margin: 0; color: var(--ink-2); }
       `v${BUILD} · ${meta.system} · ${Math.round(blob.size / 1048576)} MB`,
       `motor: ${(run && run.info.core) || engine}${run && run.info.mem ? ` · memoria ${run.info.mem} MB` : ''}${run && run.info.config ? ` · config ${run.info.config}` : ''}`,
       lazy ? `por partes (${lazyStats.via}): ${lazyStats.waited || 0} trozos con espera, ${lazyStats.ready || 0} ya listos` : 'juego cargado entero',
+      meta.system === 'PSP' ? `God of War a 30 cuadros: ${lazyStats.gow30 ? 'sí' : 'no'} · registro del motor ${run ? run.info.log0 : ''}` : '',
       `cuadros: ${frame == null ? '—' : frame}${fps == null ? '' : ` (${fps} por segundo)`} · ${gl}`,
       `audio: ${audioContexts.length ? audioContexts.map((a) => a.state).join(', ') : 'sin iniciar'}`,
       `mando: ${c ? c.id.slice(0, 40) : 'ninguno'}`,
@@ -773,6 +812,7 @@ p { margin: 0; color: var(--ink-2); }
     // If the swap did not happen the engine is holding the stand-in, not the game: say so instead of a black screen.
     if (lazy && !lazyStats.mounted) { fail('No se pudo conectar el juego con el motor para leerlo por partes. Cierra y abre la app e inténtalo de nuevo.'); return; }
     step('juego en marcha');
+    let beats = 0;
     setTimeout(() => { logOn = false; }, 15000); // after that the log is no longer about starting up
     const hint = setInterval(() => { $('soundHint').hidden = !silent(); }, 400);
     setTimeout(() => { clearInterval(hint); $('soundHint').hidden = true; }, 60000);
@@ -786,6 +826,7 @@ p { margin: 0; color: var(--ink-2); }
       run.alive = Date.now();
       try { run.info.frames = window.EJS_emulator.gameManager.getFrameNum(); } catch {}
       saveRun();
+      if (!crashed && ++beats === 30) { try { localStorage.removeItem(logKey); } catch {} } // a minute and a half of play: it works
     }, 3000);
   };
   step('cargando el emulador');
