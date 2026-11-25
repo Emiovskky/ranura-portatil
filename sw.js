@@ -1,13 +1,13 @@
 // Ranura offline cache. It only manages its own caches: the game library and saves live in
 // IndexedDB and are never touched here, so updating the app cannot erase them.
-const VERSION = 'a43176a32e61';
+const VERSION = 'feaf69bc83a0';
 const CACHE = 'ranura-app-' + VERSION;
 const FONTS = 'ranura-fonts';
 // The PSP engine (~15 MB) is cached the first time the PSP page uses it, not at install.
 const PSP_CACHE = 'ranura-psp-4.2.3';
 // The newer EmulatorJS used for PSP has its own cache: its files are different files with the same names.
 const EJS43_CACHE = 'ranura-ejs43-pre1';
-const ASSETS = ["./","index.html","psp.html","consola.html","ps2.html","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
+const ASSETS = ["./","index.html","psp.html","consola.html","ps2.html","engines.json","manifest.webmanifest","icons/icon-180.png","icons/icon-192.png","icons/icon-512.png","core/mgba.js","core/mgba.wasm","core/mgba.sdk.js","core/mgba.config.js","core/mgba.options.js","core/mgba.manifest.js","core/mgba.zip.js","core/mgba-sink.js"];
 
 // psp.html needs SharedArrayBuffer, which browsers only allow on cross-origin isolated pages.
 // Static hosts cannot send those headers, so the worker adds them to that page.
@@ -64,6 +64,8 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  // A page that wants a file straight from the network marks the request; it is not answered from here.
+  if (url.searchParams.has('directo')) return;
   // A game being played asks for one piece of its file at a time (see consola.html).
   if (url.origin === self.location.origin && /\/disc\/[a-z0-9]+$/i.test(url.pathname)) {
     event.respondWith(discPiece(url));

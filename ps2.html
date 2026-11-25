@@ -130,9 +130,16 @@ async function main() {
   try {
     const db = await new Promise((res, rej) => { const r = indexedDB.open('ranura'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     if (db.objectStoreNames.contains('roms') && db.objectStoreNames.contains('meta')) {
-      const get = (store) => new Promise((res, rej) => { const g = db.transaction(store).objectStore(store).get(id); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+      const get = (store, key = id) => new Promise((res, rej) => { const g = db.transaction(store).objectStore(store).get(key); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+      // A game that came out of a .zip is stored in pieces: one Blob made of them reads like the whole file.
+      const whole = async (r) => {
+        if (r instanceof Blob || !r || !(r.parts > 0) || r.pending) return r;
+        const list = [];
+        for (let i = 0; i < r.parts; i++) list.push(await get('roms', id + '#' + i));
+        return list.every((b) => b instanceof Blob) ? new Blob(list, { type: 'application/octet-stream' }) : null;
+      };
       meta = await get('meta');
-      blob = await get('roms');
+      blob = await whole(await get('roms'));
     }
   } catch {}
   if (!meta || !(blob instanceof Blob)) { fail('Ese juego ya no está en el estante. Vuelve e insértalo de nuevo.'); return; }

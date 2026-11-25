@@ -126,9 +126,14 @@ p { margin: 0; color: var(--ink-2); max-width: 65ch; }
   async function fromShelf(id) {
     const db = await new Promise((res, rej) => { const r = indexedDB.open('ranura'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     if (!db.objectStoreNames.contains('roms') || !db.objectStoreNames.contains('meta')) return null;
-    const get = (store) => new Promise((res, rej) => { const g = db.transaction(store).objectStore(store).get(id); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
+    const get = (store, key = id) => new Promise((res, rej) => { const g = db.transaction(store).objectStore(store).get(key); g.onsuccess = () => res(g.result); g.onerror = () => rej(g.error); });
     const meta = await get('meta');
-    const blob = await get('roms');
+    let blob = await get('roms');
+    if (blob && !(blob instanceof Blob) && blob.parts > 0 && !blob.pending) { // stored in pieces (it came out of a .zip)
+      const list = [];
+      for (let i = 0; i < blob.parts; i++) list.push(await get('roms', id + '#' + i));
+      blob = list.every((b) => b instanceof Blob) ? new Blob(list, { type: 'application/octet-stream' }) : null;
+    }
     return meta && blob instanceof Blob ? new File([blob], meta.file || meta.name + '.iso') : null;
   }
   const shelfId = /^[a-z0-9]+$/i.test(location.hash.slice(1)) ? location.hash.slice(1) : '';

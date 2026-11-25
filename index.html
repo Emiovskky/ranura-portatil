@@ -1159,10 +1159,10 @@ body::after { display: none; }
     <span class="slot-mouth" aria-hidden="true"></span>
     <span class="slot-text">
       <strong>Insertar cartucho</strong>
-      <span id="slotHint">Elige un juego .gba, .gbc, .gb o .zip desde Archivos</span>
+      <span id="slotHint">Elige un juego desde Archivos: suelto, en .zip o en .7z</span>
     </span>
     <span class="slot-plus" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
-    <input class="vh" type="file" id="romInput">
+    <input class="vh" type="file" id="romInput" multiple>
   </label>
   <p class="shelf-msg" id="shelfMsg" role="status" aria-live="polite"></p>
 
@@ -1384,6 +1384,7 @@ const idb = (() => {
     put: (s, k, v) => run(s, 'readwrite', (st) => st.put(v, k), (m) => { m.set(k, v); }),
     del: (s, k) => run(s, 'readwrite', (st) => st.delete(k), (m) => { m.delete(k); }),
     all: (s) => run(s, 'readonly', (st) => st.getAll(), (m) => [...m.values()]),
+    keys: (s) => run(s, 'readonly', (st) => st.getAllKeys(), (m) => [...m.keys()]),
   };
 })();
 
@@ -1487,8 +1488,9 @@ const OTHER_SYSTEMS = {
   snes: 'Es un juego de Super Nintendo. Ranura solo corre GB, GBC y GBA.',
   n64: 'Es un juego de Nintendo 64. Ranura solo corre GB, GBC y GBA.',
   sega: 'Es un juego de Sega. Ranura solo corre GB, GBC y GBA.',
-  disc: 'Es una imagen de disco (PSP, PS1 u otra consola). Ranura solo corre cartuchos de GB, GBC y GBA.',
-  archive: 'Ese archivo comprimido no es .zip. Descomprímelo en Archivos (tócalo) y elige el juego que trae dentro.',
+  disc: 'Es un disco, pero no de PlayStation ni de PSP: no trae la marca de esas consolas. Ranura abre discos de PS1, PSP y PS2.',
+  pc: 'Ese disco es la versión para computadora (Windows) del juego: trae su instalador, no un juego de consola. Ranura abre discos de PS1, PSP y PS2; aquí hace falta la versión de PlayStation.',
+  archive: 'Ese archivo viene comprimido dentro de otro. Descomprímelo en una computadora y pasa el juego suelto o en un .zip.',
 };
 const startsWith = (b, sig, at = 0) => sig.every((v, i) => b[at + i] === v);
 // Names the console of a file that is not GB/GBC/GBA, or returns null.
@@ -1541,7 +1543,7 @@ function inspectRom(b, ext) {
     return { system: cgb ? 'GBC' : 'GB', title: ascii(b, 0x134, cgb ? 11 : 16), code: '', warning: '' };
   }
   if (['gba', 'gb', 'gbc'].includes(ext)) throw new RomError('El archivo tiene extensión de juego pero su contenido no lo es. Está dañado o no es una copia del cartucho.');
-  throw new RomError('Ese archivo no es un juego de GB, GBC o GBA.');
+  throw new RomError(IN_CLAUDE ? 'Ese archivo no es un juego de GB, GBC o GBA.' : 'No reconozco ese archivo. ' + CAN_DO);
 }
 function displayName(file, fallback) {
   const base = file.replace(/\.[^.]+$/, '').replace(/_/g, ' ').replace(/\s*[([][^)\]]*[)\]]/g, '').replace(/\s+/g, ' ').trim();
@@ -1820,36 +1822,333 @@ function showMsg(text, tone = '') {
   if (tone !== 'error') msgTimer = setTimeout(() => { m.textContent = ''; }, 7000);
 }
 
-async function addRomFile(file) {
-  const extOf = (n) => (n.includes('.') ? n.split('.').pop() : '').toLowerCase();
-  if (file.size === 0) { showMsg('Ese archivo está vacío (0 bytes). Vuelve a copiarlo al iPhone.', 'error'); return; }
-  const ext0 = extOf(file.name);
-  if (CONSOLE_EXTS.includes(ext0)) {
-    const hit = await settleDisc(file, detectConsole(new Uint8Array(await file.slice(0, 0x9400).arrayBuffer()), ext0, file.size));
-    if (hit?.error) { showMsg(hit.error, 'error'); return; }
-    if (hit?.system) { await addConsoleFile(file, hit.system, file.name); return; }
+// ------------------------------------------------- compressed files and discs
+// Games arrive in many wrappings: a .zip or .7z with the game inside, a disc as a .bin next to its .cue, a
+// disc cut into one file per track. All of them end up as one game on the shelf. A .zip is never loaded
+// whole and neither is the disc inside it: a phone closes the page long before that much fits in memory.
+const extOf = (n) => (n.includes('.') ? n.split('.').pop() : '').toLowerCase();
+const baseOf = (n) => n.split(/[\\/]/).pop();
+const PAGE_QUERY = new URLSearchParams(location.search); // ("small" and "piece" are for the tests)
+const PIECE = Number(PAGE_QUERY.get('piece')) || 32 * 1024 * 1024; // a long game is written to the shelf in pieces of this size
+const SMALL = Number(PAGE_QUERY.get('small')) || 96 * 1024 * 1024; // up to here a file is handled in memory (every cartridge fits)
+const CART_EXTS = ['gba', 'gbc', 'gb', 'sgb'];
+const SIDE_EXTS = ['cue', 'ccd', 'sub', 'sbi', 'm3u', 'toc', 'txt', 'nfo', 'jpg', 'jpeg', 'png', 'gif', 'url', 'html', 'htm', 'pdf', 'xml', 'diz', 'sfv', 'md5', 'sav', 'srm', 'json'];
+const CAN_DO = 'Ranura abre juegos de GB, GBC, GBA, NES, SNES, Mega Drive, N64, DS, PS1, PSP y PS2, sueltos o dentro de un .zip o .7z.';
+// A file that will not decompress: the browser's own unpacker reports it as a TypeError.
+const badArchive = (e) => e?.message === 'zip' || e instanceof TypeError || e?.name === 'DataError';
+const archiveKind = (b) => (startsWith(b, [0x50, 0x4b, 0x03, 0x04]) || startsWith(b, [0x50, 0x4b, 0x05, 0x06]) ? 'zip'
+  : startsWith(b, [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) ? '7z'
+  : startsWith(b, [0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]) ? 'rar' : '');
+
+// The list of files of a .zip, read from the end of the archive a few bytes at a time.
+async function zipEntries(file) {
+  const rd = async (off, len) => new DataView(await file.slice(off, off + len).arrayBuffer());
+  const tailLen = Math.min(file.size, 65557);
+  const tail = await rd(file.size - tailLen, tailLen);
+  let e = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) if (tail.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  if (e < 0) throw new Error('zip');
+  let count = tail.getUint16(e + 10, true), cdSize = tail.getUint32(e + 12, true), cdOff = tail.getUint32(e + 16, true);
+  if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) { // archives past 4 GB keep the real numbers apart
+    const l = e - 20;
+    if (l < 0 || tail.getUint32(l, true) !== 0x07064b50) throw new Error('zip');
+    const z = await rd(Number(tail.getBigUint64(l + 8, true)), 56);
+    if (z.byteLength < 56 || z.getUint32(0, true) !== 0x06064b50) throw new Error('zip');
+    count = Number(z.getBigUint64(32, true)); cdSize = Number(z.getBigUint64(40, true)); cdOff = Number(z.getBigUint64(48, true));
   }
-  showMsg(`Leyendo ${file.name}…`);
-  let bytes = new Uint8Array(await file.arrayBuffer());
-  let fname = file.name;
-  try {
-    const r = await extractRom(bytes, ['.gba', '.gbc', '.gb', '.sgb', '.nes', '.sfc', '.smc', '.md', '.gen', '.smd', '.z64', '.n64', '.v64', '.nds']);
-    bytes = r.bytes;
-    if (r.name) fname = r.name.split('/').pop();
-    if (r.name && CONSOLE_EXTS.includes(extOf(fname))) {
-      const hit = detectConsole(bytes.subarray(0, 0x9400), extOf(fname), bytes.length);
-      if (hit?.error) { showMsg(hit.error, 'error'); return; }
-      if (hit?.system) { await addConsoleFile(new File([bytes], fname), hit.system, fname); return; }
+  if (cdSize > 32 * 1024 * 1024 || cdOff + cdSize > file.size) throw new Error('zip');
+  const cd = await rd(cdOff, cdSize);
+  const bytes = new Uint8Array(cd.buffer);
+  const out = [];
+  for (let p = 0, i = 0; i < count && p + 46 <= cd.byteLength; i++) {
+    if (cd.getUint32(p, true) !== 0x02014b50) break;
+    const flags = cd.getUint16(p + 8, true), method = cd.getUint16(p + 10, true);
+    let cs = cd.getUint32(p + 20, true), us = cd.getUint32(p + 24, true), off = cd.getUint32(p + 42, true);
+    const n = cd.getUint16(p + 28, true), x = cd.getUint16(p + 30, true), c = cd.getUint16(p + 32, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + n));
+    for (let q = p + 46 + n, end = q + x; q + 4 <= end;) {
+      const tag = cd.getUint16(q, true), len = cd.getUint16(q + 2, true);
+      if (tag === 1) {
+        let r = q + 4;
+        if (us === 0xffffffff) { us = Number(cd.getBigUint64(r, true)); r += 8; }
+        if (cs === 0xffffffff) { cs = Number(cd.getBigUint64(r, true)); r += 8; }
+        if (off === 0xffffffff) off = Number(cd.getBigUint64(r, true));
+      }
+      q += 4 + len;
     }
-  } catch {
-    showMsg('No se pudo abrir el .zip: está dañado o usa un formato no compatible. Descomprímelo en Archivos y elige el juego directamente.', 'error');
-    return;
+    if (!name.endsWith('/')) out.push({ name, method, flags, cs, us, off });
+    p += 46 + n + x + c;
   }
+  return out;
+}
+// Where the bytes of one file of the .zip sit inside the archive.
+async function zipData(file, en) {
+  const h = new DataView(await file.slice(en.off, en.off + 30).arrayBuffer());
+  if (h.byteLength < 30 || h.getUint32(0, true) !== 0x04034b50) throw new Error('zip');
+  const start = en.off + 30 + h.getUint16(26, true) + h.getUint16(28, true);
+  if (start + en.cs > file.size) throw new Error('zip');
+  return file.slice(start, start + en.cs);
+}
+// An "item" is one file of a game wherever it lives: { name, size, blob } when its bytes are already a
+// stretch of a file on the device, or { name, size, opens: [() => stream, …] } when they have to be
+// decompressed (and, for a disc in several files, read one after another).
+const streamOf = (it) => (it.opens ? it.opens : [async () => it.blob.stream()]);
+async function settle(it) { return it.asBlob && !it.blob ? { ...it, blob: await it.asBlob(), opens: null } : it; }
+async function readSome(stream, n) {
+  const reader = stream.getReader();
+  const parts = [];
+  let got = 0;
+  while (got < n) { const { value, done } = await reader.read(); if (done) break; parts.push(value); got += value.length; }
+  try { await reader.cancel(); } catch {}
+  const out = new Uint8Array(Math.min(got, n));
+  let o = 0;
+  for (const p of parts) { const take = Math.min(p.length, out.length - o); out.set(p.subarray(0, take), o); o += take; if (o >= out.length) break; }
+  return out;
+}
+async function readAll(it) {
+  if (it.blob) return new Uint8Array(await it.blob.arrayBuffer());
+  const out = new Uint8Array(it.size);
+  let o = 0;
+  for (const open of it.opens) {
+    const reader = (await open()).getReader();
+    for (;;) { const { value, done } = await reader.read(); if (done) break; if (o + value.length > out.length) throw new Error('zip'); out.set(value, o); o += value.length; }
+  }
+  if (o !== out.length) throw new Error('zip');
+  return out;
+}
+// Writes a long game to the shelf piece by piece as it is decompressed.
+async function storePieces(id, opens, total, say) {
+  let n = 0, held = [], size = 0, done = 0, shown = -1;
+  const flush = async () => {
+    if (!size) return;
+    await idb.put('roms', `${id}#${n++}`, new Blob(held, { type: 'application/octet-stream' }));
+    held = []; size = 0;
+  };
+  for (const open of opens) {
+    const reader = (await open()).getReader();
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      let v = value;
+      while (v.length) {
+        const take = Math.min(v.length, PIECE - size);
+        held.push(take === v.length ? v : v.slice(0, take));
+        size += take; done += take;
+        v = v.subarray(take);
+        if (size === PIECE) await flush();
+      }
+      if (done > total) throw new Error('zip');
+      const pct = Math.floor((done / total) * 100);
+      if (pct !== shown) { shown = pct; say(pct); }
+    }
+  }
+  await flush();
+  if (done !== total) throw new Error('zip');
+  return n;
+}
+// Takes a game off the shelf's storage, whole or in pieces.
+async function dropRom(id) {
+  const r = await idb.get('roms', id).catch(() => null);
+  if (r && !(r instanceof Blob) && r.parts >= 0) {
+    const keys = await idb.keys('roms').catch(() => []);
+    for (const k of keys) if (String(k).startsWith(id + '#')) await idb.del('roms', k);
+  }
+  await idb.del('roms', id);
+}
+// An import that was cut short (the app was closed half way) leaves pieces nobody will read: clear them out.
+async function sweepPieces() {
+  try {
+    const keys = (await idb.keys('roms')).map(String);
+    for (const k of keys) {
+      if (k.includes('#')) continue;
+      const r = await idb.get('roms', k);
+      if (r && !(r instanceof Blob) && r.pending) await dropRom(k);
+    }
+    const whole = new Set((await idb.keys('roms')).map(String).filter((k) => !k.includes('#')));
+    for (const k of keys) if (k.includes('#') && !whole.has(k.slice(0, k.indexOf('#')))) await idb.del('roms', k);
+  } catch {}
+}
+
+// A cue sheet: the files of a disc and where each track starts.
+function parseCue(text) {
+  const files = [];
+  let cur = null, track = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    let m;
+    if ((m = /^FILE\s+(?:"(.+)"|(\S+))\s+(\S+)/i.exec(line))) { cur = { name: m[1] || m[2], type: m[3].toUpperCase(), tracks: [] }; files.push(cur); track = null; }
+    else if (cur && (m = /^TRACK\s+(\d+)\s+(\S+)/i.exec(line))) { track = { no: +m[1], mode: m[2].toUpperCase(), lines: [] }; cur.tracks.push(track); }
+    else if (track && /^(INDEX|PREGAP|POSTGAP|FLAGS)\b/i.test(line)) track.lines.push(line);
+  }
+  return files.filter((f) => f.tracks.length);
+}
+// One sheet for one file. A disc that comes as a file per track is joined end to end, and each track's
+// position moves forward by the length of the files before it (75 frames a second, 2352 bytes a frame).
+function joinCue(files, sizes) {
+  const two = (n) => String(n).padStart(2, '0');
+  const out = ['FILE "disc.bin" BINARY'];
+  let base = 0;
+  files.forEach((f, i) => {
+    for (const t of f.tracks) {
+      out.push(`  TRACK ${two(t.no)} ${t.mode}`);
+      for (const l of t.lines) {
+        const m = /^INDEX\s+(\d+)\s+(\d+):(\d+):(\d+)/i.exec(l);
+        if (!m) { out.push('    ' + l); continue; }
+        const fr = base + (+m[2] * 60 + +m[3]) * 75 + +m[4];
+        out.push(`    INDEX ${two(+m[1])} ${two(Math.floor(fr / 4500))}:${two(Math.floor(fr / 75) % 60)}:${two(fr % 75)}`);
+      }
+    }
+    base += Math.floor(sizes[i] / 2352);
+  });
+  return out.join('\n') + '\n';
+}
+const joinItems = (list, name) => {
+  const size = list.reduce((n, p) => n + p.size, 0);
+  if (list.every((p) => p.blob)) return { name, size, blob: list.length === 1 ? list[0].blob : new Blob(list.map((p) => p.blob)) };
+  return { name, size, opens: list.flatMap(streamOf) };
+};
+
+// A game that has to be decompressed and is too long to hold in memory: its console is worked out from the
+// first megabytes and the rest goes straight to the shelf.
+async function addBigItem(it, extra) {
+  showMsg(`Abriendo ${baseOf(it.name)}…`);
+  const sample = await readSome(await it.opens[0](), 4 * 1024 * 1024);
+  const hit = await settleDisc(new Blob([sample]), detectConsole(sample.subarray(0, 0x9400), extOf(it.name), it.size));
+  if (hit?.error) { showMsg(hit.error, 'error'); return false; }
+  if (!hit?.system) { showMsg(`No reconozco ${baseOf(it.name)}. ${CAN_DO}`, 'error'); return false; }
+  return addConsoleFile({ size: it.size, opens: it.opens, sample }, hit.system, baseOf(it.name), extra);
+}
+async function addItem(it, extra = {}) {
+  it = await settle(it);
+  if (it.blob) return addPlainFile(new File([it.blob], baseOf(it.name)), extra);
+  if (it.size <= SMALL) return addPlainFile(new File([await readAll(it)], baseOf(it.name)), extra);
+  return addBigItem(it, extra);
+}
+// Several files that belong together (what a .zip holds, or what was picked in one go): discs are put
+// together from their cue sheets, the other games go in one by one, and notes and pictures are left out.
+async function addBundle(items, from) {
+  const real = items.filter((it) => it.size > 0 && !/(^|\/)__MACOSX\//.test(it.name) && !baseOf(it.name).startsWith('.'));
+  const used = new Set();
+  const lower = (it) => baseOf(it.name).toLowerCase();
+  let added = 0, tried = 0;
+  for (const cue of real.filter((it) => extOf(it.name) === 'cue')) {
+    used.add(cue);
+    let sheet = [];
+    try { sheet = parseCue(new TextDecoder().decode(await readAll(await settle(cue)))); } catch {}
+    if (!sheet.length) continue;
+    let bins = sheet.map((f) => real.find((it) => !used.has(it) && lower(it) === baseOf(f.name).toLowerCase()));
+    if (bins.some((b) => !b)) {
+      const loose = real.filter((it) => !used.has(it) && ['bin', 'img', 'iso'].includes(extOf(it.name)));
+      if (sheet.length !== 1 || loose.length !== 1) continue; // the files it names are not here: they are tried on their own below
+      bins = loose;
+    }
+    bins.forEach((b) => used.add(b));
+    bins = await Promise.all(bins.map(settle));
+    const tracks = sheet.flatMap((f) => f.tracks);
+    // The sheet only matters when the disc has more than its data track (music tracks, mostly).
+    const joinable = tracks.length > 1 && sheet.every((f) => f.type === 'BINARY') && tracks.every((t) => t.mode === 'AUDIO' || /\/2352$/.test(t.mode));
+    const name = baseOf(cue.name).replace(/\.cue$/i, '.bin');
+    tried++;
+    if (await addItem(joinable ? joinItems(bins, name) : { ...bins[0], name }, joinable ? { cue: joinCue(sheet, bins.map((b) => b.size)) } : {})) added++;
+  }
+  const games = real.filter((it) => !used.has(it) && !SIDE_EXTS.includes(extOf(it.name)));
+  for (const it of games.slice(0, 24)) {
+    tried++;
+    if (await addItem(it)) added++;
+  }
+  if (!tried) {
+    const inside = real.slice(0, 4).map((it) => baseOf(it.name)).join(', ');
+    showMsg(`${from ? `${from} no trae` : 'Ahí no hay'} ningún juego que Ranura reconozca${inside ? ` (trae: ${inside}${real.length > 4 ? '…' : ''})` : ''}. ${CAN_DO}`, 'error');
+  } else if (added > 1) {
+    showMsg(`Listo: ${added} juegos en el estante.${games.length > 24 ? ' El archivo traía más; se agregaron los primeros 24.' : ''}`, 'ok');
+  }
+  return added > 0;
+}
+async function addZip(file) {
+  let entries;
+  try { entries = await zipEntries(file); } catch { showMsg('No se pudo abrir el .zip: está dañado o incompleto. Vuelve a copiarlo al teléfono.', 'error'); return false; }
+  const items = [];
+  let locked = 0, odd = 0;
+  for (const en of entries) {
+    if (en.flags & 1) locked++;
+    else if (en.method === 0) items.push({ name: en.name, size: en.us, asBlob: () => zipData(file, en), opens: [async () => (await zipData(file, en)).stream()] });
+    else if (en.method === 8 && typeof DecompressionStream === 'function') items.push({ name: en.name, size: en.us, opens: [async () => (await zipData(file, en)).stream().pipeThrough(new DecompressionStream('deflate-raw'))] });
+    else odd++;
+  }
+  if (!items.length && locked) { showMsg('Ese .zip tiene contraseña. Ábrelo en una computadora y pasa el juego sin contraseña.', 'error'); return false; }
+  if (!items.length && odd) { showMsg('Ese .zip usa un tipo de compresión que el teléfono no abre. Vuelve a comprimirlo como .zip normal o pasa el juego suelto.', 'error'); return false; }
+  try {
+    return await addBundle(items, file.name);
+  } catch (e) {
+    if (!badArchive(e)) throw e;
+    showMsg('El .zip está dañado: lo que trae dentro no se pudo descomprimir completo. Vuelve a copiarlo al teléfono.', 'error');
+    return false;
+  }
+}
+// .7z: opened with the unpacker that EmulatorJS ships. It works in memory, so it is kept for archives of moderate size.
+async function addArchive(file, kind) {
+  if (kind === 'rar') { showMsg('Los .rar no se pueden abrir aquí. Descomprímelo en una computadora y pasa el juego suelto o en un .zip.', 'error'); return false; }
+  if (IN_CLAUDE) { showMsg('Los .7z se abren en la app instalada, no dentro de Claude. Pasa el juego suelto o en un .zip.', 'error'); return false; }
+  if (file.size > 400 * 1024 * 1024) { showMsg('Ese .7z pesa demasiado para abrirlo en el teléfono. Descomprímelo en una computadora y pasa el juego suelto o en un .zip.', 'error'); return false; }
+  showMsg(`Descomprimiendo ${file.name}…`);
+  let files;
+  try {
+    const res = await fetch('psp/ejs/compression/extract7z.js');
+    if (!res.ok) throw new Error('red');
+    const url = URL.createObjectURL(new Blob([await res.text()], { type: 'application/javascript' }));
+    const data = new Uint8Array(await file.arrayBuffer());
+    files = await new Promise((resolve, reject) => {
+      const worker = new Worker(url);
+      const got = [];
+      let shown = -1;
+      worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || '7z')); };
+      worker.onmessage = (e) => {
+        const d = e.data;
+        if (!d) return;
+        if (d.t === 4 && d.total) { const pct = Math.floor((d.current / d.total) * 100); if (pct !== shown && pct >= 0 && pct <= 100) { shown = pct; showMsg(`Descomprimiendo ${file.name}… ${pct}%`); } }
+        else if (d.t === 2) got.push({ name: String(d.file), data: d.data });
+        else if (d.t === 1) { worker.terminate(); resolve(got); }
+      };
+      worker.postMessage(data, [data.buffer]);
+    });
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showMsg(e?.message === 'red' ? 'Para abrir un .7z por primera vez hace falta internet. Conéctate e inténtalo de nuevo.' : 'No se pudo abrir el .7z: está dañado o usa un formato que el teléfono no abre. Pasa el juego suelto o en un .zip.', 'error');
+    return false;
+  }
+  return addBundle(files.filter((f) => f.data && f.data.length).map((f) => ({ name: f.name, size: f.data.length, blob: new Blob([f.data]) })), file.name);
+}
+// What the player picked: one file, or several in one go (a .bin with its .cue, a handful of games).
+async function addRomFiles(files) {
+  const plain = [], packed = [];
+  for (const f of files) {
+    if (f.size === 0) { showMsg(`${f.name} está vacío (0 bytes). Vuelve a copiarlo al iPhone.`, 'error'); continue; }
+    const kind = archiveKind(new Uint8Array(await f.slice(0, 8).arrayBuffer()));
+    if (kind) packed.push([f, kind]); else plain.push(f);
+  }
+  if (plain.length === 1) await addPlainFile(plain[0]);
+  else if (plain.length) await addBundle(plain.map((f) => ({ name: f.name, size: f.size, blob: f })), '');
+  for (const [f, kind] of packed) { if (kind === 'zip') await addZip(f); else await addArchive(f, kind); }
+}
+const addRomFile = (file) => addRomFiles([file]);
+
+async function addPlainFile(file, extra = {}) {
+  if (file.size === 0) { showMsg('Ese archivo está vacío (0 bytes). Vuelve a copiarlo al iPhone.', 'error'); return false; }
+  const ext0 = extOf(file.name);
+  if (!CART_EXTS.includes(ext0)) {
+    const hit = await settleDisc(file, detectConsole(new Uint8Array(await file.slice(0, 0x9400).arrayBuffer()), ext0, file.size));
+    if (hit?.error) { showMsg(hit.error, 'error'); return false; }
+    if (hit?.system) return addConsoleFile({ size: file.size, blob: file }, hit.system, file.name, extra);
+  }
+  if (file.size > SMALL) { showMsg(`No reconozco ${file.name}. ${CAN_DO}`, 'error'); return false; }
+  showMsg(`Leyendo ${file.name}…`);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const fname = file.name;
   let info;
   try {
     info = inspectRom(bytes, extOf(fname));
   } catch (e) {
-    if (e instanceof RomError) { showMsg(e.message, 'error'); return; }
+    if (e instanceof RomError) { showMsg(e.message, 'error'); return false; }
     throw e;
   }
   const id = await gameId(bytes);
@@ -1860,31 +2159,32 @@ async function addRomFile(file) {
     await idb.put('meta', id, meta);
   } catch {
     showMsg('No hay espacio para guardar el juego en este dispositivo.', 'error');
-    return;
+    return false;
   }
   try { await navigator.storage?.persist?.(); } catch {}
   const inCloud = cloud.docs.has(id);
   const done = prev ? `${meta.name} ya estaba en el estante.` : inCloud ? `Listo: ${meta.name}. Tu partida está en tu cuenta; tócalo para seguir.` : `Listo: ${meta.name}. Tócalo para jugar.`;
   showMsg(info.warning ? `${done} Aviso: ${info.warning}` : done, info.warning ? 'warn' : 'ok');
   await renderShelf();
+  return true;
 }
 $('romInput').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0];
+  const files = [...(e.target.files || [])];
   e.target.value = '';
-  if (file) await addRomFile(file).catch((err) => showMsg('No se pudo leer el archivo: ' + (err?.message || err), 'error'));
+  if (files.length) await addRomFiles(files).catch((err) => showMsg('No se pudo leer el archivo: ' + (err?.message || err), 'error'));
 });
 const slotEl = $('slot');
 ['dragenter', 'dragover'].forEach((t) => slotEl.addEventListener(t, (e) => { e.preventDefault(); slotEl.classList.add('drag'); }));
 ['dragleave', 'drop'].forEach((t) => slotEl.addEventListener(t, () => slotEl.classList.remove('drag')));
 slotEl.addEventListener('drop', (e) => {
   e.preventDefault();
-  const file = e.dataTransfer?.files?.[0];
-  if (file) addRomFile(file).catch((err) => showMsg('No se pudo leer el archivo: ' + (err?.message || err), 'error'));
+  const files = [...(e.dataTransfer?.files || [])];
+  if (files.length) addRomFiles(files).catch((err) => showMsg('No se pudo leer el archivo: ' + (err?.message || err), 'error'));
 });
 
 async function removeCart(id) {
   await idb.del('meta', id);
-  await idb.del('roms', id);
+  await dropRom(id);
   await idb.del('covers', id);
   for (const n of [1, 2, 3, 'auto']) await idb.del('states', `${id}:${n}`);
 }
@@ -1936,6 +2236,8 @@ const CONSOLE_EXTS = ['nes', 'sfc', 'smc', 'md', 'gen', 'smd', 'z64', 'n64', 'v6
 // extension). Returns { system }, { error } with a message for the player, or null when it is not one of these.
 function detectConsole(head, ext, size) {
   const damaged = (what) => ({ error: `El archivo tiene extensión de ${what} pero su contenido no lo es. Está dañado o incompleto.` });
+  // A game of a console Ranura has no engine for: say which, instead of "not recognised".
+  const noEngine = (name) => ({ error: `Es un juego de ${name}. Ranura no tiene motor para esa consola: abre GB, GBC, GBA, NES, SNES, Mega Drive, N64, DS, PS1, PSP y PS2.` });
   if (startsWith(head, [0x4e, 0x45, 0x53, 0x1a])) return { system: 'NES' };
   if (ext === 'nes') return damaged('NES');
   const n64 = startsWith(head, [0x80, 0x37, 0x12, 0x40]) || startsWith(head, [0x37, 0x80, 0x40, 0x12]) || startsWith(head, [0x40, 0x12, 0x37, 0x80]);
@@ -1947,69 +2249,132 @@ function detectConsole(head, ext, size) {
   if (['md', 'gen'].includes(ext)) return damaged('Mega Drive');
   if (['sfc', 'smc'].includes(ext)) return size >= 0x8000 ? { system: 'SNES' } : damaged('Super Nintendo');
   if (startsWith(head, [0x50, 0x53, 0x2d, 0x58, 0x20, 0x45, 0x58, 0x45])) return { system: 'PS1' }; // PS-X EXE homebrew
-  if (startsWith(head, [0x43, 0x49, 0x53, 0x4f]) || startsWith(head, [0x00, 0x50, 0x42, 0x50])) return { system: 'PSP' };
+  if (startsWith(head, [0x43, 0x49, 0x53, 0x4f])) return { system: 'PSP' };
+  if (startsWith(head, [0x00, 0x50, 0x42, 0x50])) return { system: 'PSP', pbp: true }; // the caller looks inside: it may wrap a PS1 disc
   const PS2 = { system: 'PS2' };
-  if (head.length > 0x8030 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], 0x8001)) {
+  // Consoles without an engine here, by the mark each one leaves at the start of its games.
+  if (head.length > 0x20 && startsWith(head, [0xc2, 0x33, 0x9f, 0x3d], 0x1c)) return noEngine('GameCube');
+  if (head.length > 0x20 && startsWith(head, [0x5d, 0x1c, 0x9e, 0xa3], 0x18)) return noEngine('Wii');
+  if (ascii(head, 0, 4) === 'WBFS' || ['wbfs', 'rvz', 'gcz', 'wad'].includes(ext)) return noEngine('GameCube o Wii');
+  if (head.length > 0x104 && ['NCSD', 'NCCH'].includes(ascii(head, 0x100, 4))) return noEngine('Nintendo 3DS');
+  if (['3ds', 'cia', 'cci'].includes(ext)) return noEngine('Nintendo 3DS');
+  if (ascii(head, 0, 4) === 'PFS0' || (head.length > 0x104 && ascii(head, 0x100, 4) === 'HEAD') || ['nsp', 'xci'].includes(ext)) return noEngine('Nintendo Switch');
+  for (const at of [0, 16]) { // (16: a raw disc image keeps a header in front of each block)
+    const mark = ascii(head, at, 16);
+    if (/^SEGA SEGASATURN/.test(mark)) return noEngine('Sega Saturn');
+    if (/^SEGA SEGAKATANA/.test(mark)) return noEngine('Dreamcast');
+    if (/^SEGADISCSYSTEM|^SEGABOOTDISC/.test(mark)) return noEngine('Mega-CD');
+  }
+  if (['gdi', 'cdi'].includes(ext)) return noEngine('Dreamcast');
+  if (['sms', 'gg'].includes(ext)) return noEngine(ext === 'gg' ? 'Game Gear' : 'Master System');
+  if (['pce', 'ngp', 'ngc', 'ws', 'wsc', 'a26', 'a78', 'lnx', 'jag', 'vb', '32x'].includes(ext)) return noEngine('otra consola');
+  if (ext === 'ecm') return { error: 'Ese disco viene en formato .ecm (comprimido). Hay que convertirlo a .bin en una computadora antes de pasarlo.' };
+  // Disc images. `sector` and `skip` say how each 2048-byte block of the disc is stored: bare, or raw with
+  // a header of 24 bytes (PlayStation discs) or 16 (computer discs) in front. The caller reads the disc's
+  // folder to settle what it is.
+  const cd = (at) => head.length > at + 0x30 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], at);
+  if (cd(0x8001)) {
     const sysId = ascii(head, 0x8008, 32);
     if (/PSP/i.test(sysId)) return { system: 'PSP' };
-    // PS1 and PS2 discs carry the same label: the caller settles it by reading SYSTEM.CNF from the disc.
-    return { system: size > 750 * 1024 * 1024 ? 'PS2' : 'PS1', iso: true, labelled: /PLAYSTATION/i.test(sysId) };
+    // PS1 and PS2 discs carry the same label: SYSTEM.CNF on the disc tells them apart.
+    return { system: size > 750 * 1024 * 1024 ? 'PS2' : 'PS1', iso: true, labelled: /PLAYSTATION/i.test(sysId), sector: 2048, skip: 0 };
   }
-  if (head.length > 0x9340 && startsWith(head, [0x43, 0x44, 0x30, 0x30, 0x31], 0x9319)) {
-    return /PLAYSTATION/i.test(ascii(head, 0x9320, 32)) ? { system: 'PS1' } : { error: OTHER_SYSTEMS.disc };
-  }
+  if (cd(0x9319)) return { system: 'PS1', iso: true, labelled: /PLAYSTATION/i.test(ascii(head, 0x9320, 32)), sector: 2352, skip: 24 };
+  if (cd(0x9311)) return { system: 'PS1', iso: true, labelled: /PLAYSTATION/i.test(ascii(head, 0x9318, 32)), sector: 2352, skip: 16 };
   if (startsWith(head, [0x4d, 0x43, 0x6f, 0x6d, 0x70, 0x72, 0x48, 0x44])) return size > 900 * 1024 * 1024 ? PS2 : { system: 'PS1' }; // CHD
-  if (ext === 'cue') return { error: 'El .cue solo describe el disco. Elige el archivo grande (.bin o .chd) del mismo juego.' };
+  if (ext === 'cue') return { error: 'El .cue solo describe el disco. Elige junto con él el archivo grande (.bin) del mismo juego, o solo el .bin.' };
   if (['iso', 'cso', 'pbp', 'chd'].includes(ext)) return damaged('disco');
   return null;
 }
-// Reads SYSTEM.CNF from an ISO 9660 image (the boot file of PlayStation discs): BOOT2 means PS2, BOOT means PS1.
-async function readSystemCnf(file) {
-  const rd = async (off, len) => new Uint8Array(await file.slice(off, off + len).arrayBuffer());
+// Reads the main folder of a disc image: the names in it, and SYSTEM.CNF (the start-up file of PlayStation discs).
+async function readDiscRoot(file, sector = 2048, skip = 0) {
+  const block = async (lba, count = 1) => {
+    const out = new Uint8Array(count * 2048);
+    for (let i = 0; i < count; i++) {
+      const at = (lba + i) * sector + skip;
+      const got = new Uint8Array(await file.slice(at, at + 2048).arrayBuffer());
+      if (got.length < 2048) throw new Error('short');
+      out.set(got, i * 2048);
+    }
+    return out;
+  };
   try {
-    const pvd = await rd(0x8000, 2048);
+    const pvd = await block(16);
     if (!startsWith(pvd, [0x01, 0x43, 0x44, 0x30, 0x30, 0x31])) return null;
     const dv = new DataView(pvd.buffer);
-    const dir = await rd(dv.getUint32(158, true) * 2048, Math.min(dv.getUint32(166, true), 16 * 2048));
+    const dir = await block(dv.getUint32(158, true), Math.max(1, Math.min(Math.ceil(dv.getUint32(166, true) / 2048), 16)));
+    const names = [];
+    let cnf = '';
     for (let p = 0; p + 34 < dir.length;) {
       const len = dir[p];
       if (!len) { p = (Math.floor(p / 2048) + 1) * 2048; continue; }
-      const name = String.fromCharCode(...dir.subarray(p + 33, p + 33 + dir[p + 32]));
-      if (/^SYSTEM\.CNF/i.test(name)) {
+      const name = String.fromCharCode(...dir.subarray(p + 33, p + 33 + dir[p + 32])).replace(/;\d+$/, '').toUpperCase();
+      if (name.length > 1 || name.charCodeAt(0) > 1) names.push(name);
+      if (/^SYSTEM\.CNF/.test(name)) {
         const d = new DataView(dir.buffer, dir.byteOffset + p, 34);
-        return new TextDecoder().decode(await rd(d.getUint32(2, true) * 2048, Math.min(d.getUint32(10, true), 4096)));
+        const n = Math.min(d.getUint32(10, true), 4096);
+        try { cnf = new TextDecoder().decode((await block(d.getUint32(2, true), Math.ceil(n / 2048) || 1)).subarray(0, n)); } catch {}
       }
       p += len;
     }
-    return '';
+    return { names, cnf };
   } catch { return null; }
 }
 async function settleDisc(file, hit) {
+  if (hit?.pbp) {
+    // A .pbp is a box of files; the last one is the game. PS1 discs repackaged for the PSP start with PSISOIMG.
+    try {
+      const at = new DataView(await file.slice(0, 40).arrayBuffer()).getUint32(0x24, true);
+      const tag = ascii(new Uint8Array(await file.slice(at, at + 16).arrayBuffer()), 0, 12);
+      if (/^PSISOIMG|^PSTITLEIMG/.test(tag)) return { system: 'PS1' };
+    } catch {}
+    return { system: 'PSP' };
+  }
   if (!hit?.iso) return hit;
-  const cnf = await readSystemCnf(file);
-  if (cnf && /BOOT2\s*=/i.test(cnf)) return { system: 'PS2' };
-  if (cnf && /BOOT\s*=/i.test(cnf)) return { system: 'PS1' };
-  return hit.labelled ? { system: hit.system } : { error: OTHER_SYSTEMS.disc };
+  const root = await readDiscRoot(file, hit.sector, hit.skip);
+  if (root && /BOOT2\s*=/i.test(root.cnf)) return { system: 'PS2' };
+  if (root && /BOOT\s*=/i.test(root.cnf)) return { system: 'PS1' };
+  if (hit.labelled) return { system: hit.system };
+  // Not a PlayStation disc. The commonest look-alike is the computer version of the same game.
+  if (root && root.names.some((n) => /^AUTORUN\.INF$/.test(n) || /\.(EXE|CAB|DLL|MSI)$/.test(n))) return { error: OTHER_SYSTEMS.pc };
+  return { error: OTHER_SYSTEMS.disc };
 }
-async function addConsoleFile(file, system, fname) {
+// Puts a console game on the shelf. `src` is { size, blob } for a file that is already on the device, or
+// { size, opens, sample } for one that is being decompressed (sample: its first megabytes).
+async function addConsoleFile(src, system, fname, extra = {}) {
   const info = CONSOLES[system];
-  if (IN_CLAUDE) { showMsg(`Es un juego de ${info.note.replace(' experimental', '')}. Esa consola funciona en la app instalada (emiovskky.github.io/ranura-portatil), no dentro de Claude.`, 'warn'); return; }
-  showMsg(`Guardando ${fname}…${file.size > 200 * 1024 * 1024 ? ' puede tardar: el archivo es grande.' : ''}`);
-  const sample = new Uint8Array(await file.slice(0, 4 * 1024 * 1024).arrayBuffer());
-  const id = 'c' + (await gameId(sample)).slice(0, 20) + file.size.toString(16);
+  if (IN_CLAUDE) { showMsg(`Es un juego de ${info.note.replace(' experimental', '')}. Esa consola funciona en la app instalada (emiovskky.github.io/ranura-portatil), no dentro de Claude.`, 'warn'); return false; }
+  const size = src.size;
+  showMsg(`Guardando ${fname}…${size > 200 * 1024 * 1024 ? ' puede tardar: el archivo es grande.' : ''}`);
+  const sample = src.sample || new Uint8Array(await src.blob.slice(0, 4 * 1024 * 1024).arrayBuffer());
+  const id = 'c' + (await gameId(sample)).slice(0, 20) + size.toString(16);
   const prev = await idb.get('meta', id).catch(() => null);
+  const have = prev ? await idb.get('roms', id).catch(() => null) : null;
   const ext = (fname.includes('.') ? fname.split('.').pop() : '').toUpperCase();
-  const meta = { id, name: displayName(fname), file: fname, system, title: '', code: ext, size: file.size, addedAt: prev?.addedAt || Date.now(), lastPlayed: prev?.lastPlayed || 0 };
+  const meta = { id, name: displayName(fname), file: fname, system, title: '', code: ext, size, addedAt: prev?.addedAt || Date.now(), lastPlayed: prev?.lastPlayed || 0 };
+  if (extra.cue) meta.cue = extra.cue;
+  const whole = have instanceof Blob || (have && have.parts > 0 && !have.pending);
   try {
-    await idb.put('roms', id, file.slice(0, file.size, 'application/octet-stream')); // a Blob: the browser keeps it on disk
+    if (!whole) {
+      await dropRom(id);
+      if (src.blob) {
+        await idb.put('roms', id, src.blob.slice(0, size, 'application/octet-stream')); // a Blob: the browser keeps it on disk
+      } else {
+        await idb.put('roms', id, { parts: 0, size, pending: true });
+        const parts = await storePieces(id, src.opens, size, (pct) => showMsg(`Descomprimiendo ${fname}… ${pct}%`));
+        await idb.put('roms', id, { parts, size });
+      }
+    }
     await idb.put('meta', id, meta);
-  } catch {
-    showMsg('No hay espacio en este dispositivo para guardar ese juego.', 'error');
-    return;
+  } catch (e) {
+    await dropRom(id).catch(() => {});
+    showMsg(badArchive(e) ? `${fname} no se pudo descomprimir completo: el archivo comprimido está dañado. Vuelve a copiarlo al teléfono.` : 'No hay espacio en este dispositivo para guardar ese juego.', 'error');
+    return false;
   }
   try { await navigator.storage?.persist?.(); } catch {}
-  showMsg(prev ? `${meta.name} ya estaba en el estante.` : `Listo: ${meta.name} (${info.note}). Tócalo para jugar.`, 'ok');
+  showMsg(prev && whole ? `${meta.name} ya estaba en el estante.` : `Listo: ${meta.name} (${info.note}). Tócalo para jugar.`, 'ok');
   await renderShelf();
+  return true;
 }
 async function openConsole(meta) {
   meta.lastPlayed = Date.now();
@@ -3056,8 +3421,46 @@ function sayTip(i) {
 $('dialogNext').addEventListener('click', () => sayTip(tipIndex + 1));
 sayTip(0);
 
+// ------------------------------------------------------------- engines on the phone
+// Each console's engine used to arrive the first time one of its games was opened, so a console never
+// played before did not start without a connection. The shelf now brings them all down in the background
+// (about 35 MB, once per version) and says so when every console is ready to play offline.
+let warming = false;
+async function warmEngines() {
+  if (IN_CLAUDE || warming || !('caches' in window) || navigator.onLine === false) return;
+  warming = true;
+  try {
+    const list = await (await fetch('engines.json', { cache: 'no-cache' })).json();
+    let done = '';
+    try { done = localStorage.getItem('ranura:motores') || ''; } catch {}
+    if (done === list.v) return;
+    let fetched = 0, failed = 0;
+    for (const f of list.files) {
+      const dir = Object.keys(list.caches).find((d) => f.startsWith(d));
+      if (!dir) continue;
+      const cache = await caches.open(list.caches[dir]);
+      const url = new URL(f, location.href).href;
+      if (await cache.match(url, { ignoreSearch: true })) continue;
+      try {
+        const res = await fetch(url + '?directo=1'); // straight from the network; stored here, under its plain address
+        if (!res.ok) throw new Error(String(res.status));
+        await cache.put(url, res);
+        fetched++;
+      } catch { failed++; }
+    }
+    window.__engines = { fetched, failed, total: list.files.length };
+    if (!failed) {
+      try { localStorage.setItem('ranura:motores', list.v); } catch {}
+      if (fetched && !$('shelfMsg').textContent) showMsg('Motores descargados: todas las consolas ya funcionan sin internet.', 'ok');
+    }
+  } catch {} finally { warming = false; }
+}
+window.addEventListener('online', () => setTimeout(warmEngines, 1500));
+
 const boot = (data) => {
   renderShelf();
+  sweepPieces();
+  setTimeout(warmEngines, 2500);
   if (data?.playing) play(data.playing);
 };
 window.claude?.hot?.snapshot?.(() => { pollSave(); return { playing: current?.id || null }; });
